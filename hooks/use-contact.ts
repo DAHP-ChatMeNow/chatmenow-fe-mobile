@@ -1,0 +1,334 @@
+"use client";
+
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { contactService, ContactsResponse } from "@/services/contact";
+import { userService } from "@/services/user";
+import { User } from "@/types/user";
+import { FriendRequest } from "@/types/friend-request";
+import { useAuthStore } from "@/store/use-auth-store";
+
+export const useContacts = () => {
+  const user = useAuthStore((state) => state.user);
+  const userId = user?._id || user?.id || "";
+  return useQuery({
+    queryKey: ["contacts", userId],
+    queryFn: (): Promise<ContactsResponse> =>
+      contactService.getContacts(userId),
+    enabled: !!userId,
+    refetchOnWindowFocus: false, // ❌ Tắt auto-refetch khi focus tab
+    staleTime: 5 * 60 * 1000, // 5 phút - cho phép invalidate work
+  });
+};
+
+export const useSearchUsers = (query: string, city?: string, school?: string) => {
+  return useQuery({
+    queryKey: ["search-users", query, city, school],
+    queryFn: () => contactService.searchUsers({ q: query, city, school }),
+    enabled: query.trim().length > 0 || (!!city && city.trim().length > 0) || (!!school && school.trim().length > 0),
+  });
+};
+
+export const useSearchAndAddFriend = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: contactService.searchAndAddFriend,
+    onSuccess: () => {
+      // ❌ Bỏ invalidateQueries vì socket sẽ tự động update
+      // queryClient.invalidateQueries({ queryKey: ["friend-requests"] });
+      // queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      toast.success("Đã gửi lời mời kết bạn");
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || "Không thể gửi lời mời");
+    },
+  });
+};
+
+export const useGetUserEmail = () => {
+  return useQuery({
+    queryKey: ["user-email"],
+    queryFn: () => userService.getUserEmail(),
+    staleTime: 1000 * 60 * 10, // Cache for 10 minutes
+  });
+};
+
+export const useGetUserEmailById = (userId: string) => {
+  return useQuery({
+    queryKey: ["user-email", userId],
+    queryFn: () => userService.getUserEmailById(userId),
+    staleTime: 1000 * 60 * 10, // Cache for 10 minutes
+    enabled: !!userId,
+  });
+};
+
+export const useGetUserProfile = (userId: string) => {
+  return useQuery({
+    queryKey: ["user-profile", userId],
+    queryFn: () => userService.getUserProfile(userId),
+    staleTime: 1000 * 60 * 10, // Cache for 10 minutes
+    enabled: !!userId,
+  });
+};
+
+export const useGetFriendProfile = (userId: string) => {
+  return useQuery({
+    queryKey: ["friend-profile", userId],
+    queryFn: () => userService.getFriendProfile(userId),
+    enabled: !!userId,
+    staleTime: 1000 * 60 * 5,
+  });
+};
+
+export const useFriendRequests = () => {
+  return useQuery({
+    queryKey: ["friend-requests"],
+    queryFn: async () => {
+      const res = await contactService.getFriendRequests();
+      return res as { requests: FriendRequest[] };
+    },
+    refetchOnWindowFocus: false, // ❌ Tắt auto-refetch khi focus tab
+    staleTime: 5 * 60 * 1000, // 5 phút - cho phép invalidate work
+  });
+};
+
+export const useSendFriendRequest = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: contactService.sendFriendRequest,
+    onSuccess: () => {
+      // ❌ Bỏ invalidateQueries vì socket sẽ tự động update
+      // queryClient.invalidateQueries({ queryKey: ["friend-requests"] });
+      toast.success("Đã gửi lời mời kết bạn");
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || "Không thể gửi lời mời");
+    },
+  });
+};
+
+export const useAcceptFriendRequest = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: contactService.acceptFriendRequest,
+    onSuccess: (_data: any, requestId: string) => {
+      queryClient.setQueryData(["notifications"], (oldData: any) => {
+        if (!oldData?.notifications?.length) return oldData;
+
+        return {
+          ...oldData,
+          notifications: oldData.notifications.map((noti: any) => {
+            const referencedId =
+              typeof noti.referenced === "string"
+                ? noti.referenced
+                : noti.referenced?.id || noti.referenced?._id || "";
+
+            if (
+              noti.type === "friend_request" &&
+              referencedId &&
+              referencedId === requestId
+            ) {
+              return {
+                ...noti,
+                isRead: true,
+              };
+            }
+
+            return noti;
+          }),
+          unreadCount: Math.max(
+            0,
+            Number(oldData.unreadCount || 0) - 1,
+          ),
+        };
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["friend-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      toast.success("Đã chấp nhận lời mời kết bạn");
+    },
+    onError: (error: any) => {
+      toast.error(
+        error?.response?.data?.message || "Không thể chấp nhận lời mời",
+      );
+    },
+  });
+};
+
+export const useRejectFriendRequest = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: contactService.rejectFriendRequest,
+    onSuccess: (_data: any, requestId: string) => {
+      queryClient.setQueryData(["notifications"], (oldData: any) => {
+        if (!oldData?.notifications?.length) return oldData;
+
+        return {
+          ...oldData,
+          notifications: oldData.notifications.map((noti: any) => {
+            const referencedId =
+              typeof noti.referenced === "string"
+                ? noti.referenced
+                : noti.referenced?.id || noti.referenced?._id || "";
+
+            if (
+              noti.type === "friend_request" &&
+              referencedId &&
+              referencedId === requestId
+            ) {
+              return {
+                ...noti,
+                isRead: true,
+              };
+            }
+
+            return noti;
+          }),
+          unreadCount: Math.max(
+            0,
+            Number(oldData.unreadCount || 0) - 1,
+          ),
+        };
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      toast.success("Đã từ chối lời mời kết bạn");
+    },
+    onError: (error: any) => {
+      toast.error(
+        error?.response?.data?.message || "Không thể từ chối lời mời",
+      );
+    },
+  });
+};
+
+export const useRemoveFriend = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: contactService.removeFriend,
+    onSuccess: () => {
+      // ⚠️ Giữ lại invalidate cho remove friend vì BE chưa có socket event
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      toast.success("Đã xóa bạn");
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || "Không thể xóa bạn");
+    },
+  });
+};
+
+export const useBlockedUsers = () => {
+  const user = useAuthStore((state) => state.user);
+  const userId = user?._id || user?.id;
+
+  return useQuery({
+    queryKey: ["blocked-users", userId],
+    queryFn: () => userService.getBlockedUsers(),
+    enabled: !!userId,
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+};
+
+export const useRestrictedUsers = () => {
+  const user = useAuthStore((state) => state.user);
+  const userId = user?._id || user?.id;
+
+  return useQuery({
+    queryKey: ["restricted-users", userId],
+    queryFn: () => userService.getRestrictedUsers(),
+    enabled: !!userId,
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+};
+
+export const useBlockUser = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: userService.blockUser,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["blocked-users"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["conversation"] });
+      queryClient.invalidateQueries({ queryKey: ["friend-profile"] });
+      toast.success("Đã chặn người dùng");
+    },
+    onError: (error: any) => {
+      toast.error(error?.response?.data?.message || "Không thể chặn người dùng");
+    },
+  });
+};
+
+export const useUnblockUser = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: userService.unblockUser,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["blocked-users"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["conversation"] });
+      queryClient.invalidateQueries({ queryKey: ["friend-profile"] });
+      toast.success("Đã mở chặn người dùng");
+    },
+    onError: (error: any) => {
+      toast.error(
+        error?.response?.data?.message || "Không thể mở chặn người dùng",
+      );
+    },
+  });
+};
+
+export const useRestrictUser = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: userService.restrictUser,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["restricted-users"] });
+      queryClient.invalidateQueries({ queryKey: ["blocked-users"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["conversation"] });
+      queryClient.invalidateQueries({ queryKey: ["friend-profile"] });
+      toast.success("Đã thêm vào danh sách hạn chế");
+    },
+    onError: (error: any) => {
+      toast.error(
+        error?.response?.data?.message || "Không thể thêm vào danh sách hạn chế",
+      );
+    },
+  });
+};
+
+export const useUnrestrictUser = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: userService.unrestrictUser,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["restricted-users"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["conversation"] });
+      queryClient.invalidateQueries({ queryKey: ["friend-profile"] });
+      toast.success("Đã bỏ hạn chế người dùng");
+    },
+    onError: (error: any) => {
+      toast.error(
+        error?.response?.data?.message || "Không thể bỏ hạn chế người dùng",
+      );
+    },
+  });
+};

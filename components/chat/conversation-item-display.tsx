@@ -1,0 +1,247 @@
+"use client";
+
+import { useConversationDisplay } from "@/hooks/use-chat";
+import { ChatItem } from "./chat-item";
+import { Conversation } from "@/types/conversation";
+import { formatMessageTime } from "@/lib/utils";
+import { useMarkConversationAsRead } from "@/hooks/use-chat";
+import { useQueryClient } from "@tanstack/react-query";
+import { ConversationsResponse } from "@/services/chat";
+
+type ChatMemberUser =
+  | string
+  | {
+      _id?: string;
+      id?: string;
+      displayName?: string;
+      avatar?: string;
+    };
+
+type ChatConversationMember = Omit<Conversation["members"][number], "userId"> & {
+  userId: ChatMemberUser;
+};
+
+type ChatConversation = Omit<Conversation, "members"> & {
+  members: ChatConversationMember[];
+};
+
+type GroupAvatarMemberView = {
+  userId: string;
+  displayName: string;
+  avatar?: string;
+};
+
+const FORWARDED_MESSAGE_MARKER = "[chatmenow-forwarded]";
+const FORWARDED_FROM_PREFIX = "[chatmenow-forwarded-from]";
+
+const parseForwardedPreview = (content?: string) => {
+  const raw = String(content || "");
+  if (!raw.startsWith(FORWARDED_MESSAGE_MARKER)) {
+    return { isForwarded: false, forwardedFrom: "", displayContent: raw };
+  }
+
+  const stripped = raw.slice(FORWARDED_MESSAGE_MARKER.length).replace(/^\n+/, "");
+  const lines = stripped.split("\n");
+  const firstLine = String(lines[0] || "").trim();
+  const hasFrom = firstLine.startsWith(FORWARDED_FROM_PREFIX);
+  const forwardedFrom = hasFrom ? firstLine.slice(FORWARDED_FROM_PREFIX.length).trim() : "";
+  const displayContent = hasFrom ? lines.slice(1).join("\n") : stripped;
+  return { isForwarded: true, forwardedFrom, displayContent };
+};
+
+const getMemberUserId = (
+  member: ChatConversationMember,
+): string | undefined => {
+  if (typeof member.userId === "string") return member.userId;
+  return member.userId?._id || member.userId?.id;
+};
+
+const getLastMessageSenderId = (conversation: Conversation): string | undefined => {
+  const sender = conversation.lastMessage?.senderId;
+  if (!sender) return undefined;
+  if (typeof sender === "string") return sender;
+  return sender._id || sender.id;
+};
+
+const formatLastMessagePreview = (conversation: Conversation): string => {
+  const lastMessage = conversation.lastMessage;
+  if (!lastMessage) return "Chưa có tin nhắn";
+
+  const callStatus = (
+    lastMessage.callInfo?.status ||
+    lastMessage.content ||
+    ""
+  ).toLowerCase();
+
+  if (lastMessage.type === "system") {
+    if (callStatus === "accepted") {
+      return lastMessage.content || "Một thành viên đã tham gia cuộc gọi";
+    }
+    if (callStatus === "ended") return "Cuộc gọi kết thúc";
+    if (callStatus === "rejected") return "Cuộc gọi bị từ chối";
+    if (callStatus === "missed") return "Cuộc gọi nhỡ";
+  }
+
+  if (lastMessage.type === "shared_post") {
+    if (lastMessage.content && lastMessage.content.trim()) {
+      return `Đã chia sẻ bài viết: ${lastMessage.content}`;
+    }
+    return "Đã chia sẻ một bài viết";
+  }
+
+  const { isForwarded, forwardedFrom, displayContent } = parseForwardedPreview(
+    lastMessage.content,
+  );
+  const safeContent = String(displayContent || "").trim();
+  if (isForwarded) {
+    if (safeContent) {
+      return forwardedFrom
+        ? `Chuyển tiếp từ ${forwardedFrom}: ${safeContent}`
+        : `Chuyển tiếp: ${safeContent}`;
+    }
+    return forwardedFrom ? `Chuyển tiếp từ ${forwardedFrom}` : "Tin nhắn chuyển tiếp";
+  }
+
+  return safeContent || "Chưa có tin nhắn";
+};
+
+const isAiConversation = (conversation: Conversation): boolean => {
+  const extra = conversation as Conversation & {
+    isAI?: boolean;
+    isAi?: boolean;
+    isAiAssistant?: boolean;
+  };
+  const type = String(conversation.type || "").toLowerCase();
+  return (
+    type === "ai" ||
+    Boolean(extra.isAI) ||
+    Boolean(extra.isAi) ||
+    Boolean(extra.isAiAssistant)
+  );
+};
+
+export function ConversationItemDisplay({
+  conversation,
+  currentUserId,
+  isActive,
+}: {
+  conversation: Conversation;
+  currentUserId: string | undefined;
+  isActive: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const { mutate: markConversationAsRead } = useMarkConversationAsRead();
+  const typedConversation = conversation as ChatConversation;
+  const { displayName, avatar } = useConversationDisplay(
+    conversation,
+    currentUserId,
+  );
+  const isAi = isAiConversation(conversation);
+  const isBlocked = Boolean(conversation.isBlocked);
+  const blockedLabel = conversation.blockedByMe
+    ? "Bạn đã chặn người này"
+    : conversation.blockedByOther
+      ? "Người này đã chặn bạn"
+      : undefined;
+  const statusLabel = undefined;
+
+  const fallbackName = isAi ? "Chat AI" : "Unknown";
+  const fallbackLastMessage = isAi
+    ? "Bắt đầu hỏi AI về bất kỳ chủ đề nào"
+    : "Chưa có tin nhắn";
+  const groupAvatarMembers: GroupAvatarMemberView[] =
+    conversation.type === "group"
+      ? typedConversation.members
+          .map((member) => {
+            const userId = getMemberUserId(member);
+            const profile =
+              typeof member.userId === "string" ? undefined : member.userId;
+            const fallbackMemberName = profile?.displayName || "User";
+
+            return {
+              userId: userId || fallbackMemberName,
+              displayName: fallbackMemberName,
+              avatar: profile?.avatar || "",
+            };
+          })
+          .filter((member) => Boolean(member.userId))
+      : [];
+  const shouldUseCompositeGroupAvatar =
+    conversation.type === "group" &&
+    !conversation.groupAvatar &&
+    groupAvatarMembers.length >= 3;
+  const groupMemberCount =
+    conversation.type === "group" ? typedConversation.members.length : 0;
+
+  const unreadCount = Number(conversation.unreadCount || 0);
+  const normalizedUnreadCount =
+    Number.isFinite(unreadCount) && unreadCount > 0 ? Math.floor(unreadCount) : 0;
+  const fallbackUnreadByLastReadAt = (() => {
+    if (normalizedUnreadCount > 0) return 0;
+    if (!currentUserId) return 0;
+
+    const lastMessage = conversation.lastMessage;
+    if (!lastMessage?.createdAt) return 0;
+    const hasMentionSyntax = /(^|\s)@[^\s@]+/.test(String(lastMessage.content || ""));
+    if (!hasMentionSyntax) return 0;
+
+    const lastMessageSenderId = getLastMessageSenderId(conversation);
+    if (lastMessageSenderId && lastMessageSenderId === currentUserId) return 0;
+
+    const currentMember = typedConversation.members.find(
+      (member) => getMemberUserId(member) === currentUserId,
+    );
+
+    const messageTimestamp = new Date(lastMessage.createdAt).getTime();
+    if (!Number.isFinite(messageTimestamp) || messageTimestamp <= 0) return 0;
+
+    const lastReadTimestamp = currentMember?.lastReadAt
+      ? new Date(currentMember.lastReadAt).getTime()
+      : 0;
+
+    // If member has never read, or latest message is newer than lastReadAt,
+    // keep conversation visually unread even when unreadCount is temporarily stale.
+    return !Number.isFinite(lastReadTimestamp) || messageTimestamp > lastReadTimestamp
+      ? 1
+      : 0;
+  })();
+  const safeUnreadCount = Math.max(normalizedUnreadCount, fallbackUnreadByLastReadAt);
+  const handleOpenConversation = () => {
+    if (safeUnreadCount <= 0) return;
+
+    queryClient.setQueryData<ConversationsResponse>(
+      ["conversations"],
+      (oldData) => {
+        if (!oldData?.conversations?.length) return oldData;
+
+        return {
+          ...oldData,
+          conversations: oldData.conversations.map((item) =>
+            item.id === conversation.id ? { ...item, unreadCount: 0 } : item,
+          ),
+        };
+      },
+    );
+
+    markConversationAsRead(conversation.id);
+  };
+
+  return (
+    <ChatItem
+      id={conversation.id}
+      avatar={avatar}
+      name={displayName || conversation.name || fallbackName}
+      lastMsg={formatLastMessagePreview(conversation) || fallbackLastMessage}
+      statusLabel={statusLabel}
+      time={formatMessageTime(conversation.lastMessage?.createdAt)}
+      unread={safeUnreadCount}
+      isActive={isActive}
+      isBlocked={isBlocked}
+      blockedLabel={blockedLabel}
+      useCompositeGroupAvatar={shouldUseCompositeGroupAvatar}
+      groupAvatarMembers={groupAvatarMembers}
+      groupMemberCount={groupMemberCount}
+      onOpenConversation={handleOpenConversation}
+    />
+  );
+}

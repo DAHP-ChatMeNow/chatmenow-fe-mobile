@@ -1,0 +1,1660 @@
+"use client";
+
+import { useState, useRef } from "react";
+import { useSearchParams } from "next/navigation";
+import FriendProfileView from "./friend-profile-view";
+import {
+  Camera,
+  Loader,
+  Loader2,
+  Trash2,
+  Upload,
+  Heart,
+  MessageCircle,
+  Share2,
+  Send,
+  MoreHorizontal,
+  Globe,
+  Users,
+  SlidersHorizontal,
+  Lock,
+  Check,
+  MapPin,
+  ImagePlus,
+  Palette,
+  Crown,
+} from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { PresignedAvatar } from "@/components/ui/presigned-avatar";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useAuthStore } from "@/store/use-auth-store";
+import {
+  useUpdateProfile,
+  useUpdateAvatar,
+  useDeleteAvatar,
+  useUpdateCoverImage,
+  useDeleteCoverImage,
+  usePresignedUrl,
+} from "@/hooks/use-profile";
+import {
+  useUserPosts,
+  useUpdatePostPrivacy,
+  useDeletePost,
+  useLikePost,
+  useComments,
+  useAddComment,
+  usePostAiChat,
+} from "@/hooks/use-post";
+import {
+  AiPostChatPopup,
+  type AiPopupMessage,
+} from "@/components/post/ai-post-chat-popup";
+import { BlogSkeleton } from "@/components/skeletons/blog-skeleton";
+import { useLanguage } from "@/contexts/language-context";
+import { Post, PostMedia, PostPrivacy } from "@/types/post";
+import { AiSuggestion } from "@/services/post";
+import { formatPresenceStatus, formatPostTime } from "@/lib/utils";
+import { PostMediaLightbox } from "@/components/post/post-media-lightbox";
+import { PostShareDialog } from "@/components/post/post-share-dialog";
+import { SharedPostPreview } from "@/components/post/shared-post-preview";
+import { getPostPrivacyLabel, POST_PRIVACY_OPTIONS } from "@/lib/post-privacy";
+import { toast } from "sonner";
+import {
+  DEFAULT_PROFILE_COVER_CLASS,
+  PROFILE_COVER_PRESETS,
+  getProfileCoverPreset,
+} from "@/lib/profile-cover";
+
+const VIETNAM_PROVINCES = [
+  "An Giang",
+  "Bà Rịa - Vũng Tàu",
+  "Bắc Giang",
+  "Bắc Kạn",
+  "Bạc Liêu",
+  "Bắc Ninh",
+  "Bến Tre",
+  "Bình Định",
+  "Bình Dương",
+  "Bình Phước",
+  "Bình Thuận",
+  "Cà Mau",
+  "Cần Thơ",
+  "Cao Bằng",
+  "Đà Nẵng",
+  "Đắk Lắk",
+  "Đắk Nông",
+  "Điện Biên",
+  "Đồng Nai",
+  "Đồng Tháp",
+  "Gia Lai",
+  "Hà Giang",
+  "Hà Nam",
+  "Hà Nội",
+  "Hà Tĩnh",
+  "Hải Dương",
+  "Hải Phòng",
+  "Hậu Giang",
+  "Hòa Bình",
+  "Hưng Yên",
+  "Khánh Hòa",
+  "Kiên Giang",
+  "Kon Tum",
+  "Lai Châu",
+  "Lâm Đồng",
+  "Lạng Sơn",
+  "Lào Cai",
+  "Long An",
+  "Nam Định",
+  "Nghệ An",
+  "Ninh Bình",
+  "Ninh Thuận",
+  "Phú Thọ",
+  "Phú Yên",
+  "Quảng Bình",
+  "Quảng Nam",
+  "Quảng Ngãi",
+  "Quảng Ninh",
+  "Quảng Trị",
+  "Sóc Trăng",
+  "Sơn La",
+  "Tây Ninh",
+  "Thái Bình",
+  "Thái Nguyên",
+  "Thanh Hóa",
+  "Thừa Thiên Huế",
+  "Tiền Giang",
+  "Hồ Chí Minh",
+  "Trà Vinh",
+  "Tuyên Quang",
+  "Vĩnh Long",
+  "Vĩnh Phúc",
+  "Yên Bái",
+];
+
+const GENDER_OPTIONS = ["Nam", "Nữ", "Khác"];
+const MARITAL_STATUS_OPTIONS = ["Độc thân", "Hẹn hò", "Tìm hiểu", "Đã kết hôn"];
+
+const extractProvinceName = (value: string) =>
+  value
+    .replace(/^thành phố\s+/i, "")
+    .replace(/^tp\.?\s*/i, "")
+    .replace(/^tỉnh\s+/i, "")
+    .trim();
+
+const getPostPrivacyIcon = (privacy?: string, className = "w-3.5 h-3.5") => {
+  switch (privacy) {
+    case "friends":
+      return <Users className={className} />;
+    case "custom":
+      return <SlidersHorizontal className={className} />;
+    case "private":
+      return <Lock className={className} />;
+    case "public":
+    default:
+      return <Globe className={className} />;
+  }
+};
+
+export default function ProfilePage() {
+  const user = useAuthStore((state) => state.user);
+  const { t, language } = useLanguage();
+
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [showCoverPresetDialog, setShowCoverPresetDialog] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [displayName, setDisplayName] = useState(user?.displayName || "");
+  const [bio, setBio] = useState(user?.bio || "");
+  const [hometown, setHometown] = useState(user?.hometown || "");
+  const [phoneNumber, setPhoneNumber] = useState(user?.phoneNumber || "");
+  const [gender, setGender] = useState(user?.gender || "");
+  const [school, setSchool] = useState(user?.school || "");
+  const [maritalStatus, setMaritalStatus] = useState(user?.maritalStatus || "");
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+
+  const currentUserId = user?.id || user?._id;
+
+  const searchParams = useSearchParams();
+  const queryUserId = searchParams.get("userId");
+
+  if (queryUserId && queryUserId !== currentUserId) {
+    return <FriendProfileView userId={queryUserId} />;
+  }
+
+  const { mutate: updateProfile, isPending: isUpdating } = useUpdateProfile();
+  const { mutate: updateAvatar, isPending: isUploadingAvatar } =
+    useUpdateAvatar();
+  const { mutate: deleteAvatar, isPending: isDeletingAvatar } =
+    useDeleteAvatar();
+  const { mutate: updateCoverImage, isPending: isUploadingCover } =
+    useUpdateCoverImage();
+  const { mutate: deleteCoverImage, isPending: isDeletingCover } =
+    useDeleteCoverImage();
+  const { mutate: likePost } = useLikePost();
+  const { mutate: updatePostPrivacy, isPending: isUpdatingPostPrivacy } =
+    useUpdatePostPrivacy();
+  const { mutate: deletePost, isPending: isDeletingPost } = useDeletePost();
+  const {
+    data: postsData,
+    isLoading: isLoadingPosts,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useUserPosts(currentUserId);
+
+  const [expandedPostId, setExpandedPostId] = useState<string | null>(null);
+  const [commentInputs, setCommentInputs] = useState<Record<string, string>>(
+    {},
+  );
+  const [aiSuggestions, setAiSuggestions] = useState<
+    Record<string, AiSuggestion>
+  >({});
+  const [aiPopupOpen, setAiPopupOpen] = useState(false);
+  const [aiPopupPostId, setAiPopupPostId] = useState<string | null>(null);
+  const [aiPopupConversationId, setAiPopupConversationId] = useState<
+    string | undefined
+  >(undefined);
+  const [aiPopupInput, setAiPopupInput] = useState("");
+  const [aiPopupMessages, setAiPopupMessages] = useState<AiPopupMessage[]>([]);
+  const [aiPopupOptions, setAiPopupOptions] = useState<string[]>([]);
+
+  const handleAvatarClick = () => {
+    avatarInputRef.current?.click();
+  };
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Show preview
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setPreviewAvatar(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+
+      // Upload to backend
+      updateAvatar(file, {
+        onSuccess: () => {
+          // Clear preview after successful upload so S3 URL is used
+          setTimeout(() => setPreviewAvatar(null), 1000);
+        },
+        onError: () => {
+          // Clear preview on error too
+          setPreviewAvatar(null);
+        },
+      });
+    }
+  };
+
+  const handleDeleteAvatar = () => {
+    setShowDeleteConfirm(true);
+  };
+
+  const handleCoverUploadClick = () => {
+    coverInputRef.current?.click();
+  };
+
+  const confirmDeleteAvatar = () => {
+    deleteAvatar(undefined, {
+      onSettled: () => {
+        setShowDeleteConfirm(false);
+      },
+    });
+  };
+
+  const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    updateCoverImage(file);
+    e.target.value = "";
+  };
+
+  const handleDeleteCoverImage = () => {
+    deleteCoverImage();
+  };
+
+  const handleSelectCoverPreset = (presetId: string) => {
+    updateProfile({ themeColor: presetId });
+    setShowCoverPresetDialog(false);
+  };
+
+  const handleSaveProfile = () => {
+    updateProfile(
+      {
+        displayName: displayName.trim(),
+        bio: bio.trim(),
+        hometown: hometown.trim(),
+        phoneNumber: phoneNumber.trim(),
+        gender: gender.trim(),
+        school: school.trim(),
+        maritalStatus: maritalStatus.trim(),
+      },
+      { onSuccess: () => setShowEditDialog(false) },
+    );
+  };
+
+  const handleUseCurrentLocation = async () => {
+    if (!navigator?.geolocation) {
+      toast.error("Thiết bị không hỗ trợ định vị");
+      return;
+    }
+
+    setIsDetectingLocation(true);
+    try {
+      const position = await new Promise<GeolocationPosition>(
+        (resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+          });
+        },
+      );
+
+      const { latitude, longitude } = position.coords;
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&accept-language=vi`,
+      );
+      if (!response.ok) {
+        throw new Error("Không thể lấy dữ liệu vị trí");
+      }
+
+      const locationData = await response.json();
+      const address = locationData?.address || {};
+      const locationCandidates = [
+        address.state,
+        address.province,
+        address.city,
+        address.region,
+        address.county,
+        address.state_district,
+      ].filter(Boolean);
+
+      if (locationCandidates.length === 0) {
+        toast.error("Không xác định được tỉnh/thành");
+        return;
+      }
+
+      const resolvedHometown = extractProvinceName(locationCandidates[0]);
+      setHometown(resolvedHometown);
+      toast.success("Đã cập nhật quê quán theo vị trí hiện tại");
+    } catch (error: unknown) {
+      const geoError = error as GeolocationPositionError | undefined;
+      if (geoError?.code === 1) {
+        toast.error("Bạn chưa cấp quyền truy cập vị trí");
+      } else if (geoError?.code === 3) {
+        toast.error("Hết thời gian lấy vị trí, vui lòng thử lại");
+      } else {
+        toast.error("Không thể lấy vị trí hiện tại");
+      }
+    } finally {
+      setIsDetectingLocation(false);
+    }
+  };
+
+  const handleLike = (postId: string, isLiked: boolean) => {
+    likePost(
+      { postId, isLiked },
+      {
+        onSuccess: (response: { aiSuggestion?: AiSuggestion }) => {
+          if (response.aiSuggestion) {
+            setAiSuggestions((prev) => ({
+              ...prev,
+              [postId]: response.aiSuggestion!,
+            }));
+          }
+        },
+      },
+    );
+  };
+
+  const handleAddComment = (postId: string) => {
+    const content = commentInputs[postId]?.trim();
+    if (!content) return;
+
+    addComment(
+      {
+        postId,
+        content,
+      },
+      {
+        onSuccess: () => {
+          setCommentInputs((prev) => ({ ...prev, [postId]: "" }));
+        },
+      },
+    );
+  };
+
+  const handleUpdatePostPrivacy = (
+    postId: string,
+    privacy: PostPrivacy,
+    audienceIds?: string[],
+  ) => {
+    updatePostPrivacy({
+      postId,
+      payload: {
+        privacy,
+        customAudienceIds: privacy === "custom" ? audienceIds || [] : [],
+      },
+    });
+  };
+
+  const handleDeletePost = (postId: string) => {
+    if (!window.confirm("Bạn chắc chắn muốn xóa bài viết này?")) return;
+    deletePost(postId);
+  };
+
+  const allPosts = Array.from(
+    new Map(
+      (postsData?.pages.flatMap((p) => p.posts) || []).map((p) => [p.id, p]),
+    ).values(),
+  );
+  const isPostActionPending = isUpdatingPostPrivacy || isDeletingPost;
+
+  const { mutate: addComment, isPending: isAddingComment } = useAddComment();
+  const { mutateAsync: askAiFromPost, isPending: isAskingAi } = usePostAiChat();
+
+  const sendAiPopupMessage = async (postId: string, content: string) => {
+    const text = content.trim();
+    if (!text) return;
+
+    setAiPopupMessages((prev) => [...prev, { role: "user", content: text }]);
+    setAiPopupInput("");
+
+    try {
+      const result = await askAiFromPost({
+        postId,
+        content: text,
+        conversationId: aiPopupConversationId,
+      });
+
+      if (result.conversationId) {
+        setAiPopupConversationId(result.conversationId);
+      }
+
+      if (result.reply) {
+        setAiPopupMessages((prev) => [
+          ...prev,
+          { role: "ai", content: result.reply! },
+        ]);
+      }
+
+      if (Array.isArray(result.options)) {
+        setAiPopupOptions(result.options);
+      }
+    } catch {
+      // Error toast handled in hook.
+    }
+  };
+
+  const openAiPopupWithSuggestion = async (
+    postId: string,
+    suggestion?: string,
+  ) => {
+    const content = (suggestion || aiSuggestions[postId]?.text || "").trim();
+    if (!content) return;
+
+    setAiPopupOpen(true);
+    setAiPopupPostId(postId);
+    setAiPopupConversationId(undefined);
+    setAiPopupMessages([]);
+    setAiPopupOptions(aiSuggestions[postId]?.options || []);
+
+    await sendAiPopupMessage(postId, content);
+  };
+
+  const coverImageValue = user?.coverImage || "";
+  const selectedCoverPreset = getProfileCoverPreset(user?.themeColor);
+  const isDirectCoverImage =
+    !!coverImageValue &&
+    (coverImageValue.startsWith("http://") ||
+      coverImageValue.startsWith("https://") ||
+      coverImageValue.startsWith("data:") ||
+      coverImageValue.startsWith("blob:") ||
+      coverImageValue.startsWith("/"));
+  const { data: coverPresignedData } = usePresignedUrl(
+    coverImageValue,
+    !!coverImageValue && !isDirectCoverImage,
+  );
+  const resolvedCoverImage = isDirectCoverImage
+    ? coverImageValue
+    : (coverPresignedData?.viewUrl ?? "");
+  const coverClassName =
+    selectedCoverPreset?.className || DEFAULT_PROFILE_COVER_CLASS;
+  const showCoverImage = !selectedCoverPreset && !!resolvedCoverImage;
+  const isCoverBusy = isUploadingCover || isDeletingCover;
+  const premiumExpiryTime = user?.premiumExpiryDate
+    ? new Date(user.premiumExpiryDate).getTime()
+    : null;
+  const isPremiumActive = Boolean(
+    user?.isPremium &&
+      (premiumExpiryTime === null || premiumExpiryTime > Date.now()),
+  );
+
+  if (!user) return null;
+
+  const profileDetails = [
+    { label: "Quê quán", value: user.hometown },
+    { label: "Số điện thoại", value: user.phoneNumber },
+    { label: "Giới tính", value: user.gender },
+    { label: "Trường học", value: user.school },
+    { label: "Tình trạng hôn nhân", value: user.maritalStatus },
+  ].filter((item) => !!item.value?.trim());
+
+  return (
+    <div className="flex flex-col w-full h-full bg-slate-50/50 dark:bg-slate-900">
+      <ScrollArea className="flex-1 w-full">
+        <div className="w-full max-w-3xl min-w-0 px-0 py-0 pb-8 mx-auto space-y-4 md:max-w-3xl md:py-6 md:px-6 lg:max-w-4xl">
+          {/* === FB-style Profile Header Card === */}
+          <div className="overflow-hidden bg-white border-0 rounded-none shadow-sm dark:bg-slate-800 md:rounded-2xl md:border border-slate-100 dark:border-slate-700">
+            {/* Cover Photo */}
+            <div className="relative h-56 overflow-hidden md:h-66">
+              {showCoverImage ? (
+                <img
+                  src={resolvedCoverImage}
+                  alt="Ảnh bìa"
+                  className="object-cover w-full h-full"
+                />
+              ) : (
+                <div className={`h-full w-full ${coverClassName}`} />
+              )}
+
+              <div className="absolute inset-0 bg-black/10" />
+
+              <div className="absolute right-3 top-3">
+                {isCoverBusy ? (
+                  <div className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-white rounded-lg bg-black/50">
+                    <Loader className="h-3.5 w-3.5 animate-spin" />
+                    <span>
+                      {isDeletingCover ? "Đang xóa..." : "Đang tải..."}
+                    </span>
+                  </div>
+                ) : (
+                  <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium transition rounded-lg shadow-sm bg-white/95 text-slate-800 hover:bg-white"
+                        aria-label="Chỉnh sửa ảnh bìa"
+                        type="button"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span className="hidden sm:inline">
+                          Chỉnh sửa ảnh bìa
+                        </span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      className="z-[90] w-56 border-slate-200 bg-white text-slate-900 shadow-xl backdrop-blur-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                    >
+                      <DropdownMenuItem
+                        onClick={handleCoverUploadClick}
+                        className="gap-3 cursor-pointer focus:bg-slate-100 dark:focus:bg-slate-700"
+                      >
+                        <ImagePlus className="w-4 h-4 text-blue-600" />
+                        <span>Tải ảnh bìa lên</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setShowCoverPresetDialog(true)}
+                        className="gap-3 cursor-pointer focus:bg-slate-100 dark:focus:bg-slate-700"
+                      >
+                        <Palette className="w-4 h-4 text-violet-600" />
+                        <span>Chọn nền màu</span>
+                      </DropdownMenuItem>
+                      {user.coverImage && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={handleDeleteCoverImage}
+                            className="gap-3 text-red-600 cursor-pointer focus:bg-red-50 focus:text-red-600"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            <span>Xóa ảnh bìa</span>
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </div>
+
+              <input
+                ref={coverInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleCoverChange}
+                className="hidden"
+                disabled={isCoverBusy}
+              />
+            </div>
+
+            {/* Avatar + Info */}
+            <div className="px-4 pb-4 md:px-6">
+              {/* Avatar row */}
+              <div className="flex items-end justify-between mb-3 -mt-12 md:-mt-16">
+                <div className="relative">
+                  {previewAvatar ? (
+                    <Avatar className="w-24 h-24 border-4 border-white shadow-lg md:h-32 md:w-32 dark:border-slate-800">
+                      <AvatarImage src={previewAvatar} alt={user.displayName} />
+                      <AvatarFallback className="text-3xl font-bold text-white bg-gradient-to-br from-blue-500 to-purple-500">
+                        {user.displayName?.charAt(0).toUpperCase() || "U"}
+                      </AvatarFallback>
+                    </Avatar>
+                  ) : (
+                    <PresignedAvatar
+                      avatarKey={user.avatar}
+                      displayName={user.displayName}
+                      className="w-24 h-24 border-4 border-white shadow-lg md:h-32 md:w-32 dark:border-slate-800"
+                      fallbackClassName="text-3xl font-bold"
+                    />
+                  )}
+                  {/* Camera Button */}
+                  {isUploadingAvatar || isDeletingAvatar ? (
+                    <div className="absolute p-2 bg-blue-500 rounded-full shadow-lg bottom-1 right-1">
+                      <Loader className="w-4 h-4 text-white animate-spin" />
+                    </div>
+                  ) : (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          className="absolute p-2 transition-all bg-white border-2 rounded-full shadow-lg bottom-1 right-1 dark:bg-slate-700 hover:bg-gray-100 border-slate-200 dark:border-slate-600 hover:scale-105"
+                          aria-label="Chỉnh sửa ảnh đại diện"
+                        >
+                          <Camera className="w-4 h-4 text-slate-700 dark:text-slate-200" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align="end"
+                        className="bg-white w-52 dark:bg-slate-800"
+                      >
+                        <DropdownMenuItem
+                          onClick={handleAvatarClick}
+                          className="gap-3 cursor-pointer"
+                        >
+                          <Upload className="w-4 h-4 text-blue-600" />
+                          <span className="font-medium">Tải ảnh lên</span>
+                        </DropdownMenuItem>
+                        {user.avatar &&
+                          !user.avatar.includes("ui-avatars.com") && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={handleDeleteAvatar}
+                                className="gap-3 text-red-600 cursor-pointer focus:text-red-600 focus:bg-red-50"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                <span className="font-medium">Xóa ảnh</span>
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarChange}
+                    className="hidden"
+                    disabled={isUploadingAvatar || isDeletingAvatar}
+                  />
+                </div>
+
+                {/* Edit button top-right */}
+                <Button
+                  onClick={() => setShowEditDialog(true)}
+                  className="px-5 py-2 mb-1 text-sm font-semibold text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700"
+                >
+                  {t.editProfile}
+                </Button>
+              </div>
+
+              {/* Name + bio */}
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-bold leading-tight md:text-2xl text-slate-900 dark:text-white">
+                  {user.displayName || "User"}
+                </h2>
+                {isPremiumActive ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-amber-700 bg-amber-100 rounded-full">
+                    <Crown className="w-3.5 h-3.5" />
+                    Premium
+                  </span>
+                ) : null}
+              </div>
+              {user.bio && (
+                <p className="max-w-lg mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  {user.bio}
+                </p>
+              )}
+              {profileDetails.length > 0 && (
+                <div className="grid gap-2 mt-3 sm:grid-cols-2">
+                  {profileDetails.map((item) => (
+                    <div
+                      key={item.label}
+                      className="px-3 py-2 text-xs rounded-lg bg-slate-100 dark:bg-slate-700/60"
+                    >
+                      <p className="font-semibold text-slate-500 dark:text-slate-300">
+                        {item.label}
+                      </p>
+                      <p className="mt-0.5 text-sm text-slate-800 dark:text-slate-100">
+                        {item.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="mt-1 text-xs text-slate-400">
+                @{user.id?.slice(0, 8)}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                {formatPresenceStatus(
+                  user.isOnline,
+                  user.lastSeen,
+                  user.lastSeenText,
+                )}
+              </p>
+
+              {/* stats row */}
+              <div className="flex gap-5 pt-3 mt-3 border-t border-slate-100 dark:border-slate-700">
+                <div className="text-center">
+                  <p className="text-base font-bold text-slate-900 dark:text-white">
+                    {allPosts.length}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    {language === "vi" ? "bài viết" : "posts"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* === Posts Feed === */}
+          <div className="px-0 space-y-4 md:px-0">
+            {isLoadingPosts ? (
+              <>
+                <BlogSkeleton />
+                <BlogSkeleton />
+              </>
+            ) : allPosts.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 p-12 mx-4 bg-white border shadow-sm dark:bg-slate-800 rounded-2xl border-slate-100 dark:border-slate-700 text-slate-400 md:mx-0">
+                <MessageCircle className="w-10 h-10 opacity-30" />
+                <p className="text-sm font-medium">
+                  {language === "vi" ? "Chưa có bài viết nào" : "No posts yet"}
+                </p>
+              </div>
+            ) : (
+              <>
+                {allPosts.map((post) => (
+                  <ProfilePostCard
+                    key={post.id}
+                    post={post}
+                    canManage={true}
+                    isExpanded={expandedPostId === post.id}
+                    onToggleExpand={() =>
+                      setExpandedPostId(
+                        expandedPostId === post.id ? null : post.id,
+                      )
+                    }
+                    onLike={() =>
+                      handleLike(post.id, post.isLikedByCurrentUser || false)
+                    }
+                    currentUserAvatar={user?.avatar}
+                    currentUserDisplayName={user?.displayName}
+                    commentInput={commentInputs[post.id] || ""}
+                    onCommentInputChange={(val) =>
+                      setCommentInputs((prev) => ({ ...prev, [post.id]: val }))
+                    }
+                    onAddComment={() => handleAddComment(post.id)}
+                    onUpdatePrivacy={(privacy, audienceIds) =>
+                      handleUpdatePostPrivacy(post.id, privacy, audienceIds)
+                    }
+                    onDelete={() => handleDeletePost(post.id)}
+                    isMutatingPost={isPostActionPending}
+                    fallbackSuggestion={aiSuggestions[post.id]}
+                    onAskAi={(suggestion) =>
+                      openAiPopupWithSuggestion(post.id, suggestion)
+                    }
+                    isAskingAi={isAskingAi}
+                    isAddingComment={isAddingComment}
+                  />
+                ))}
+
+                {isFetchingNextPage && (
+                  <div className="flex justify-center py-4">
+                    <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
+                  </div>
+                )}
+                {hasNextPage && !isFetchingNextPage && (
+                  <button
+                    onClick={() => fetchNextPage()}
+                    className="w-full py-3 mx-4 text-sm font-semibold text-blue-600 transition-colors dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl md:mx-0"
+                  >
+                    {language === "vi" ? "Xem thêm" : "Load more"}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </ScrollArea>
+
+      <Dialog
+        open={showCoverPresetDialog}
+        onOpenChange={setShowCoverPresetDialog}
+      >
+        <DialogContent className="max-w-lg bg-white dark:bg-slate-800">
+          <DialogHeader>
+            <DialogTitle className="dark:text-white">
+              Chọn nền ảnh bìa
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {PROFILE_COVER_PRESETS.map((preset) => {
+              const isSelected = user.themeColor === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => handleSelectCoverPreset(preset.id)}
+                  className={`group relative h-24 overflow-hidden rounded-xl border transition ${
+                    isSelected
+                      ? "border-blue-500 ring-2 ring-blue-200"
+                      : "border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <div className={`h-full w-full ${preset.className}`} />
+                  <div className="absolute inset-x-0 bottom-0 px-2 py-1 text-xs font-medium text-center text-white bg-black/35">
+                    {preset.name}
+                  </div>
+                  {isSelected && (
+                    <span className="absolute inline-flex items-center justify-center w-5 h-5 text-white bg-blue-600 rounded-full right-2 top-2">
+                      <Check className="h-3.5 w-3.5" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Profile Dialog */}
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent className="max-w-xl bg-white dark:bg-slate-800">
+          <DialogHeader>
+            <DialogTitle className="dark:text-white">
+              {t.editProfile}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Display Name */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-900 dark:text-slate-200">
+                {t.displayName}
+              </label>
+              <Input
+                placeholder={
+                  language === "vi" ? "Nhập tên của bạn" : "Enter your name"
+                }
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                disabled={isUpdating}
+                className="dark:bg-slate-700 dark:text-white dark:border-slate-600"
+              />
+            </div>
+
+            {/* Bio */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-900 dark:text-slate-200">
+                {t.bio}
+              </label>
+              <Textarea
+                placeholder={
+                  language === "vi"
+                    ? "Kể về bạn..."
+                    : "Tell us about yourself..."
+                }
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                disabled={isUpdating}
+                className="min-h-[100px] dark:bg-slate-700 dark:text-white dark:border-slate-600"
+              />
+              <p className="text-xs text-slate-400">{bio.length}/160</p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-sm font-medium text-slate-900 dark:text-slate-200">
+                  Quê quán
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleUseCurrentLocation}
+                  disabled={isUpdating || isDetectingLocation}
+                  className="h-8 px-2 text-xs"
+                >
+                  {isDetectingLocation ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                  ) : (
+                    <MapPin className="w-3.5 h-3.5 mr-1" />
+                  )}
+                  Vị trí hiện tại
+                </Button>
+              </div>
+              <Select
+                value={hometown || undefined}
+                onValueChange={setHometown}
+                disabled={isUpdating || isDetectingLocation}
+              >
+                <SelectTrigger className="dark:bg-slate-700 dark:text-white dark:border-slate-600">
+                  <SelectValue placeholder="Chọn tỉnh/thành" />
+                </SelectTrigger>
+                <SelectContent className="z-[80] max-h-72 border-slate-200 bg-white text-slate-900 shadow-xl dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                  {hometown && !VIETNAM_PROVINCES.includes(hometown) && (
+                    <SelectItem
+                      value={hometown}
+                      className="text-slate-800 focus:bg-slate-100 focus:text-slate-900 dark:text-slate-100 dark:focus:bg-slate-700 dark:focus:text-slate-100"
+                    >
+                      {hometown}
+                    </SelectItem>
+                  )}
+                  {VIETNAM_PROVINCES.map((province) => (
+                    <SelectItem
+                      key={province}
+                      value={province}
+                      className="text-slate-800 focus:bg-slate-100 focus:text-slate-900 dark:text-slate-100 dark:focus:bg-slate-700 dark:focus:text-slate-100"
+                    >
+                      {province}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {hometown && (
+                <button
+                  type="button"
+                  className="text-xs text-blue-600 hover:text-blue-700"
+                  onClick={() => setHometown("")}
+                  disabled={isUpdating || isDetectingLocation}
+                >
+                  Xóa lựa chọn
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-900 dark:text-slate-200">
+                Số điện thoại
+              </label>
+              <Input
+                placeholder={
+                  language === "vi"
+                    ? "Nhập số điện thoại công khai"
+                    : "Enter public phone number"
+                }
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                disabled={isUpdating}
+                className="dark:bg-slate-700 dark:text-white dark:border-slate-600"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-900 dark:text-slate-200">
+                Giới tính
+              </label>
+              <Select
+                value={gender || undefined}
+                onValueChange={setGender}
+                disabled={isUpdating}
+              >
+                <SelectTrigger className="dark:bg-slate-700 dark:text-white dark:border-slate-600">
+                  <SelectValue placeholder="Chọn giới tính" />
+                </SelectTrigger>
+                <SelectContent className="z-[80] border-slate-200 bg-white text-slate-900 shadow-xl dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                  {gender && !GENDER_OPTIONS.includes(gender) && (
+                    <SelectItem
+                      value={gender}
+                      className="text-slate-800 focus:bg-slate-100 focus:text-slate-900 dark:text-slate-100 dark:focus:bg-slate-700 dark:focus:text-slate-100"
+                    >
+                      {gender}
+                    </SelectItem>
+                  )}
+                  {GENDER_OPTIONS.map((option) => (
+                    <SelectItem
+                      key={option}
+                      value={option}
+                      className="text-slate-800 focus:bg-slate-100 focus:text-slate-900 dark:text-slate-100 dark:focus:bg-slate-700 dark:focus:text-slate-100"
+                    >
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {gender && (
+                <button
+                  type="button"
+                  className="text-xs text-blue-600 hover:text-blue-700"
+                  onClick={() => setGender("")}
+                  disabled={isUpdating}
+                >
+                  Xóa lựa chọn
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-900 dark:text-slate-200">
+                Trường học / Học vấn
+              </label>
+              <Input
+                placeholder={
+                  language === "vi"
+                    ? "Nhập trường học"
+                    : "Enter school/education"
+                }
+                value={school}
+                onChange={(e) => setSchool(e.target.value)}
+                disabled={isUpdating}
+                className="dark:bg-slate-700 dark:text-white dark:border-slate-600"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-900 dark:text-slate-200">
+                Tình trạng hôn nhân
+              </label>
+              <Select
+                value={maritalStatus || undefined}
+                onValueChange={setMaritalStatus}
+                disabled={isUpdating}
+              >
+                <SelectTrigger className="dark:bg-slate-700 dark:text-white dark:border-slate-600">
+                  <SelectValue placeholder="Chọn tình trạng hôn nhân" />
+                </SelectTrigger>
+                <SelectContent className="z-[80] border-slate-200 bg-white text-slate-900 shadow-xl dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                  {maritalStatus &&
+                    !MARITAL_STATUS_OPTIONS.includes(maritalStatus) && (
+                      <SelectItem
+                        value={maritalStatus}
+                        className="text-slate-800 focus:bg-slate-100 focus:text-slate-900 dark:text-slate-100 dark:focus:bg-slate-700 dark:focus:text-slate-100"
+                      >
+                        {maritalStatus}
+                      </SelectItem>
+                    )}
+                  {MARITAL_STATUS_OPTIONS.map((option) => (
+                    <SelectItem
+                      key={option}
+                      value={option}
+                      className="text-slate-800 focus:bg-slate-100 focus:text-slate-900 dark:text-slate-100 dark:focus:bg-slate-700 dark:focus:text-slate-100"
+                    >
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {maritalStatus && (
+                <button
+                  type="button"
+                  className="text-xs text-blue-600 hover:text-blue-700"
+                  onClick={() => setMaritalStatus("")}
+                  disabled={isUpdating}
+                >
+                  Xóa lựa chọn
+                </button>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => setShowEditDialog(false)}
+                disabled={isUpdating}
+                className="flex-1 dark:border-slate-600 dark:text-white dark:hover:bg-slate-700"
+              >
+                {t.cancel}
+              </Button>
+              <Button
+                onClick={handleSaveProfile}
+                disabled={isUpdating}
+                className="flex-1 bg-blue-600 hover:bg-blue-700"
+              >
+                {isUpdating ? (
+                  <>
+                    <Loader className="w-4 h-4 mr-2 animate-spin" />
+                    {language === "vi" ? "Đang lưu..." : "Saving..."}
+                  </>
+                ) : (
+                  t.save
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Avatar Confirmation Dialog - Facebook Style */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="max-w-md gap-0 p-0 bg-white border-0 shadow-2xl dark:bg-slate-800 rounded-2xl">
+          {/* Header with Icon */}
+          <div className="px-6 pt-6 pb-4 space-y-3">
+            <div className="flex justify-center">
+              <div className="flex items-center justify-center w-16 h-16 bg-red-100 rounded-full dark:bg-red-900/30">
+                <Trash2 className="w-8 h-8 text-red-600 dark:text-red-400" />
+              </div>
+            </div>
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold text-center text-slate-900 dark:text-white">
+                Xóa ảnh đại diện?
+              </DialogTitle>
+            </DialogHeader>
+            <p className="px-2 text-sm leading-relaxed text-center text-slate-600 dark:text-slate-400">
+              Bạn có chắc muốn xóa ảnh đại diện của mình không? Ảnh sẽ được thay
+              thế bằng avatar mặc định.
+            </p>
+          </div>
+
+          {/* Divider */}
+          <div className="h-px bg-slate-200 dark:bg-slate-700"></div>
+
+          {/* Buttons */}
+          <div className="flex gap-3 p-4">
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteConfirm(false)}
+              disabled={isDeletingAvatar}
+              className="flex-1 font-semibold transition-all bg-white border-2 h-11 border-slate-200 dark:border-slate-600 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl"
+            >
+              Hủy
+            </Button>
+            <Button
+              onClick={confirmDeleteAvatar}
+              disabled={isDeletingAvatar}
+              className="flex-1 font-semibold text-white transition-all bg-red-600 shadow-lg h-11 hover:bg-red-700 rounded-xl shadow-red-600/25 hover:shadow-red-600/40"
+            >
+              {isDeletingAvatar ? (
+                <>
+                  <Loader className="w-4 h-4 mr-2 animate-spin" />
+                  Đang xóa...
+                </>
+              ) : (
+                "Xóa"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <AiPostChatPopup
+        open={aiPopupOpen}
+        onOpenChange={setAiPopupOpen}
+        title="Phản hồi"
+        messages={aiPopupMessages}
+        inputValue={aiPopupInput}
+        onInputChange={setAiPopupInput}
+        onSend={() => {
+          if (!aiPopupPostId) return;
+          void sendAiPopupMessage(aiPopupPostId, aiPopupInput);
+        }}
+        isSending={isAskingAi}
+        options={aiPopupOptions}
+        onPickOption={(option) => {
+          if (!aiPopupPostId) return;
+          void sendAiPopupMessage(aiPopupPostId, option);
+        }}
+      />
+    </div>
+  );
+}
+
+// ===================== PostMediaGrid =====================
+function PostMediaGrid({
+  media,
+  onMediaClick,
+}: {
+  media: PostMedia[];
+  onMediaClick?: (index: number) => void;
+}) {
+  if (!media || media.length === 0) return null;
+  const count = media.length;
+
+  const getMediaKind = (item: PostMedia): "image" | "video" => {
+    const mediaType = String(item.type || "")
+      .trim()
+      .toLowerCase();
+    const mediaUrl = String(item.url || "").toLowerCase();
+
+    const isVideoByType =
+      mediaType === "video" || mediaType.startsWith("video/");
+    const isVideoByExt = /\.(mp4|mov|avi|mkv|webm|m4v)(\?|#|$)/i.test(mediaUrl);
+
+    if (isVideoByType || isVideoByExt) return "video";
+    return "image";
+  };
+
+  const mediaEl = (item: PostMedia, index: number, cls = "") => {
+    if (getMediaKind(item) === "video") {
+      return (
+        <button
+          key={item.url}
+          type="button"
+          onClick={() => onMediaClick?.(index)}
+          className={`relative w-full h-full ${cls}`}
+          aria-label="Xem video"
+        >
+          <video
+            src={item.url}
+            muted
+            playsInline
+            preload="metadata"
+            className="object-cover w-full h-full pointer-events-none"
+          />
+          <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <span className="inline-flex items-center justify-center w-10 h-10 text-sm text-white rounded-full bg-black/45">
+              ▶
+            </span>
+          </span>
+        </button>
+      );
+    }
+    return (
+      <img
+        key={item.url}
+        src={item.url}
+        alt=""
+        onClick={() => onMediaClick?.(index)}
+        className={`w-full h-full object-cover ${cls}`}
+      />
+    );
+  };
+
+  if (count === 1)
+    return (
+      <div className="h-[500px] overflow-hidden cursor-zoom-in">
+        {mediaEl(media[0], 0)}
+      </div>
+    );
+
+  if (count === 2)
+    return (
+      <div className="h-[500px] grid grid-cols-2 gap-0.5 overflow-hidden">
+        {media.map((m, idx) => (
+          <div key={m.url} className="overflow-hidden cursor-zoom-in">
+            {mediaEl(m, idx)}
+          </div>
+        ))}
+      </div>
+    );
+
+  if (count === 3)
+    return (
+      <div className="h-[500px] grid grid-cols-2 grid-rows-2 gap-0.5 overflow-hidden">
+        <div className="col-span-2 overflow-hidden cursor-zoom-in">
+          {mediaEl(media[0], 0)}
+        </div>
+        <div className="overflow-hidden cursor-zoom-in">
+          {mediaEl(media[1], 1)}
+        </div>
+        <div className="overflow-hidden cursor-zoom-in">
+          {mediaEl(media[2], 2)}
+        </div>
+      </div>
+    );
+
+  if (count === 4)
+    return (
+      <div className="h-[500px] grid grid-cols-2 gap-0.5 overflow-hidden">
+        {media.map((m, idx) => (
+          <div key={m.url} className="overflow-hidden cursor-zoom-in">
+            {mediaEl(m, idx)}
+          </div>
+        ))}
+      </div>
+    );
+
+  const remaining = count > 5 ? count - 5 : 0;
+  return (
+    <div className="h-[500px] flex flex-col gap-0.5 overflow-hidden">
+      <div className="grid grid-cols-2 gap-0.5 flex-[3] min-h-0">
+        {media.slice(0, 2).map((m, idx) => (
+          <div key={m.url} className="overflow-hidden cursor-zoom-in">
+            {mediaEl(m, idx)}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-3 gap-0.5 flex-[2] min-h-0">
+        {media.slice(2, 5).map((m, i) => (
+          <div key={m.url} className="relative overflow-hidden cursor-zoom-in">
+            {mediaEl(m, i + 2)}
+            {i === 2 && remaining > 0 && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                <span className="text-2xl font-bold text-white">
+                  +{remaining}
+                </span>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ===================== ProfilePostCard =====================
+interface ProfilePostCardProps {
+  post: Post;
+  canManage: boolean;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onLike: () => void;
+  currentUserAvatar?: string;
+  currentUserDisplayName?: string;
+  commentInput: string;
+  onCommentInputChange: (val: string) => void;
+  onAddComment: () => void;
+  onUpdatePrivacy: (privacy: PostPrivacy, audienceIds?: string[]) => void;
+  onDelete: () => void;
+  isMutatingPost: boolean;
+  fallbackSuggestion?: AiSuggestion;
+  onAskAi: (suggestion?: string) => void;
+  isAskingAi: boolean;
+  isAddingComment: boolean;
+}
+
+function ProfilePostCard({
+  post,
+  canManage,
+  isExpanded,
+  onToggleExpand,
+  onLike,
+  currentUserAvatar,
+  currentUserDisplayName,
+  commentInput,
+  onCommentInputChange,
+  onAddComment,
+  onUpdatePrivacy,
+  onDelete,
+  isMutatingPost,
+  fallbackSuggestion,
+  onAskAi,
+  isAskingAi,
+  isAddingComment,
+}: ProfilePostCardProps) {
+  const { data: commentsData } = useComments(isExpanded ? post.id : "");
+  const comments = commentsData?.comments || [];
+  const aiSuggestion = commentsData?.aiSuggestion || fallbackSuggestion;
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const likesCount = post.likesCount ?? 0;
+  const commentsCount = post.commentsCount ?? 0;
+  const hasStats = likesCount > 0 || commentsCount > 0;
+  const privacyMenuOptions = POST_PRIVACY_OPTIONS.filter(
+    (option) =>
+      option.value !== "custom" || (post.customAudienceIds || []).length > 0,
+  );
+
+  return (
+    <div className="overflow-hidden bg-white border-0 rounded-none shadow-sm dark:bg-slate-800 md:rounded-none md:border border-slate-100 dark:border-slate-700">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 pt-4 pb-2">
+        <div className="flex items-center gap-3">
+          <PresignedAvatar
+            avatarKey={post.author?.avatar}
+            displayName={post.author?.displayName}
+            className="w-10 h-10"
+          />
+          <div>
+            <p className="text-sm font-semibold leading-tight text-slate-900 dark:text-white">
+              {post.author?.displayName || "User"}
+            </p>
+            <p className="flex items-center gap-1 text-[11px] text-slate-400">
+              {formatPostTime(post.createdAt)}
+              <span>•</span>
+              <span className="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                {getPostPrivacyIcon(post.privacy, "h-3 w-3")}
+                {getPostPrivacyLabel(post.privacy)}
+              </span>
+            </p>
+          </div>
+        </div>
+        {canManage ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="p-2 transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-700">
+                <MoreHorizontal className="w-5 h-5 text-slate-500" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-64 p-2 bg-white rounded-xl border-slate-200 dark:border-slate-700 dark:bg-slate-800"
+            >
+              <DropdownMenuLabel className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                Quyền riêng tư
+              </DropdownMenuLabel>
+              {privacyMenuOptions.map((option) => {
+                const isCurrent = post.privacy === option.value;
+                return (
+                  <DropdownMenuItem
+                    key={option.value}
+                    className="flex items-start gap-2 py-2 rounded-lg"
+                    disabled={isCurrent || isMutatingPost}
+                    onClick={() =>
+                      onUpdatePrivacy(
+                        option.value,
+                        option.value === "custom"
+                          ? post.customAudienceIds
+                          : undefined,
+                      )
+                    }
+                  >
+                    <span className="mt-0.5 text-slate-500 dark:text-slate-300">
+                      {getPostPrivacyIcon(option.value, "h-4 w-4")}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-medium text-slate-800 dark:text-slate-100">
+                        {option.label}
+                      </span>
+                      <span className="block text-xs text-slate-500 dark:text-slate-400">
+                        {option.description}
+                      </span>
+                    </span>
+                    {isCurrent ? (
+                      <Check className="w-4 h-4 text-blue-600" />
+                    ) : null}
+                  </DropdownMenuItem>
+                );
+              })}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-red-600 rounded-lg focus:bg-red-50 focus:text-red-600 dark:focus:bg-red-900/30"
+                disabled={isMutatingPost}
+                onClick={onDelete}
+              >
+                <Trash2 className="w-4 h-4" />
+                Xóa bài viết
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <button className="p-2 rounded-full">
+            <MoreHorizontal className="w-5 h-5 text-slate-300" />
+          </button>
+        )}
+      </div>
+
+      {/* Content */}
+      {post.content && (
+        <p className="px-4 pb-3 text-sm leading-relaxed whitespace-pre-wrap text-slate-800 dark:text-slate-200">
+          {post.content}
+        </p>
+      )}
+
+      {post.sharedPost ? (
+        <div className="px-4 pb-3">
+          <SharedPostPreview post={post.sharedPost} />
+        </div>
+      ) : null}
+
+      {/* Media */}
+      {post.media && post.media.length > 0 && (
+        <div className="mx-0">
+          <PostMediaGrid media={post.media} onMediaClick={setLightboxIndex} />
+        </div>
+      )}
+
+      {post.media && lightboxIndex !== null && (
+        <PostMediaLightbox
+          open={lightboxIndex !== null}
+          media={post.media}
+          initialIndex={lightboxIndex}
+          author={{
+            displayName: post.author?.displayName,
+            avatar: post.author?.avatar,
+          }}
+          content={post.content}
+          createdAt={post.createdAt}
+          likesCount={post.likesCount}
+          commentsCount={post.commentsCount}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
+
+      {/* Stats */}
+      {hasStats && (
+        <div className="flex items-center justify-between px-4 pt-3 pb-1">
+          {likesCount > 0 ? (
+            <span className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <Heart className="w-4 h-4 text-red-400 fill-red-400" />
+              {likesCount}
+            </span>
+          ) : (
+            <span />
+          )}
+          {commentsCount > 0 ? (
+            <span
+              className="text-sm cursor-pointer text-slate-500 dark:text-slate-400 hover:underline"
+              onClick={onToggleExpand}
+            >
+              {commentsCount} bình luận
+            </span>
+          ) : null}
+        </div>
+      )}
+
+      {/* Action bar */}
+      <div className="flex mx-0 mt-1 border-t border-slate-100 dark:border-slate-700">
+        <button
+          onClick={onLike}
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-none hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors ${
+            post.isLikedByCurrentUser
+              ? "text-red-500"
+              : "text-slate-500 dark:text-slate-400"
+          }`}
+        >
+          <Heart
+            className={`w-4 h-4 ${post.isLikedByCurrentUser ? "fill-red-500" : ""}`}
+          />
+          Thích
+        </button>
+        <button
+          onClick={onToggleExpand}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors rounded-none"
+        >
+          <MessageCircle className="w-4 h-4" />
+          Bình luận
+        </button>
+        <button
+          onClick={() => setIsShareDialogOpen(true)}
+          className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors rounded-none"
+        >
+          <Share2 className="w-4 h-4" />
+          Chia sẻ
+        </button>
+      </div>
+
+      <PostShareDialog
+        postId={post.id}
+        open={isShareDialogOpen}
+        onOpenChange={setIsShareDialogOpen}
+      />
+
+      {/* Comments section */}
+      {isExpanded && (
+        <div className="px-4 pt-2 pb-4 space-y-3 border-t border-slate-100 dark:border-slate-700">
+          {/* Existing comments */}
+          {comments.map((c) => (
+            <div key={c.id} className="flex items-start gap-2">
+              <PresignedAvatar
+                avatarKey={c.user?.avatar}
+                displayName={c.user?.displayName}
+                className="flex-shrink-0 w-8 h-8"
+              />
+              <div className="flex-1 px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-2xl">
+                <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                  {c.user?.displayName || "User"}
+                </p>
+                <p className="text-sm text-slate-700 dark:text-slate-300">
+                  {c.content}
+                </p>
+              </div>
+            </div>
+          ))}
+
+          {aiSuggestion && (
+            <div className="px-3 py-2 border border-blue-200 rounded-xl bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
+              <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                Gợi ý AI
+              </p>
+              <p className="mt-1 text-sm text-blue-900 dark:text-blue-100">
+                {aiSuggestion.text}
+              </p>
+              {aiSuggestion.options.length > 0 ? (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {aiSuggestion.options.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => onAskAi(option)}
+                      disabled={isAskingAi}
+                      className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-60 dark:border-blue-700 dark:bg-slate-800 dark:text-blue-300"
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onAskAi(aiSuggestion.text)}
+                  disabled={isAskingAi}
+                  className="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-60 dark:text-blue-300"
+                >
+                  {isAskingAi ? "Dang gui AI chat..." : "Phản hồi ngay"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Input */}
+          <div className="flex items-center gap-2 pt-1">
+            <PresignedAvatar
+              avatarKey={currentUserAvatar}
+              displayName={currentUserDisplayName}
+              className="flex-shrink-0 w-8 h-8"
+            />
+            <div className="flex-1 flex gap-2 items-center bg-slate-100 dark:bg-slate-700 rounded-full px-4 py-1.5">
+              <Input
+                value={commentInput}
+                onChange={(e) => onCommentInputChange(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && onAddComment()}
+                placeholder="Viết bình luận..."
+                className="p-0 text-sm bg-transparent border-0 focus-visible:ring-0 dark:text-white placeholder:text-slate-400"
+              />
+              <button
+                onClick={onAddComment}
+                disabled={isAddingComment || !commentInput.trim()}
+                className="flex-shrink-0 text-blue-600 hover:text-blue-700 disabled:opacity-40"
+              >
+                {isAddingComment ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

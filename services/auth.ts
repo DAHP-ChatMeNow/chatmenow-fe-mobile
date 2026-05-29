@@ -1,0 +1,231 @@
+import api from "@/lib/axios";
+import { User } from "@/types/user";
+import {
+  RememberedAccountInfoQuery,
+  RememberedAccountInfoResponse,
+  RememberedLoginPayload,
+  RevokeRememberedAccountPayload,
+} from "@/types/auth";
+
+export type LoginPayload = {
+  email: string;
+  password: string;
+  rememberAccount?: boolean;
+  deviceId: string;
+  deviceName?: string;
+  turnstileToken?: string;
+};
+
+export type RegisterPayload = {
+  displayName: string;
+  email: string;
+  password: string;
+};
+
+export type SendOtpPayload = {
+  email: string;
+};
+
+export type VerifyOtpPayload = {
+  email: string;
+  otp: string;
+};
+
+export type OtpResponse = {
+  success: boolean;
+  message: string;
+  expiresIn?: number;
+  verified?: boolean;
+};
+
+export type AccountLockReason =
+  | "temporary_leave"
+  | "security_concern"
+  | "privacy_break"
+  | "other";
+
+export type ConfirmAccountLockPayload = {
+  lockVerificationToken: string;
+  reason: AccountLockReason;
+  otherReason?: string;
+};
+
+export type VerifyAccountLockOtpPayload = {
+  otp: string;
+};
+
+export type VerifyAccountLockOtpResponse = OtpResponse & {
+  lockVerificationToken: string;
+  expiresIn: number;
+  expiresAt: string;
+};
+
+export type SendAccountUnlockOtpPayload = {
+  email: string;
+};
+
+export type ConfirmAccountUnlockPayload = {
+  email: string;
+  otp: string;
+};
+
+export type AuthResponse = {
+  user: User;
+  token: string;
+  rememberToken?: string;
+  role?: string;
+  message?: string;
+};
+
+export type GetMeResponse = {
+  success?: boolean;
+  user?: User;
+  data?: User | { user?: User };
+};
+
+export type RememberedLoginResponse = AuthResponse;
+
+export type RevokeResponse = {
+  success: boolean;
+  message: string;
+};
+
+const login = async (payload: LoginPayload) => {
+  const { data } = await api.post<AuthResponse>("/auth/login", payload);
+  return data;
+};
+
+const rememberedLogin = async (payload: RememberedLoginPayload) => {
+  const { data } = await api.post<RememberedLoginResponse>(
+    "/auth/remembered-login",
+    payload,
+  );
+  return data;
+};
+
+const getRememberedAccountInfo = async (query: RememberedAccountInfoQuery) => {
+  const { data } = await api.get<RememberedAccountInfoResponse>(
+    "/auth/remembered-account",
+    {
+      params: query,
+    },
+  );
+  return data;
+};
+
+const revokeRememberedAccount = async (
+  payload: RevokeRememberedAccountPayload,
+) => {
+  const { data } = await api.post<RevokeResponse>(
+    "/auth/remembered-account/revoke",
+    payload,
+  );
+  return data;
+};
+
+const sendOtp = async (payload: SendOtpPayload) => {
+  const { data } = await api.post<OtpResponse>("/auth/send-otp", payload);
+  return data;
+};
+
+const verifyOtp = async (payload: VerifyOtpPayload) => {
+  const { data } = await api.post<OtpResponse>("/auth/verify-otp", payload);
+  return data;
+};
+
+const register = async (payload: RegisterPayload) => {
+  const { data } = await api.post<AuthResponse>("/auth/register", payload);
+  return data;
+};
+
+const getMe = async () => {
+  const { data } = await api.get<GetMeResponse>("/auth/me");
+  const rawAsUser =
+    data &&
+    typeof data === "object" &&
+    ("_id" in data || "id" in data || "displayName" in data)
+      ? (data as unknown as User)
+      : undefined;
+
+  const candidate =
+    data?.user ||
+    (data?.data && "user" in data.data
+      ? data.data.user
+      : (data?.data as User | undefined)) ||
+    rawAsUser;
+
+  if (!candidate) {
+    throw new Error("Không tìm thấy thông tin người dùng từ /auth/me");
+  }
+
+  const accountRef =
+    candidate.accountId && typeof candidate.accountId === "object"
+      ? candidate.accountId
+      : undefined;
+
+  return {
+    ...candidate,
+    id: candidate.id || candidate._id || "",
+    isPremium:
+      typeof candidate.isPremium === "boolean"
+        ? candidate.isPremium
+        : typeof accountRef?.isPremium === "boolean"
+          ? accountRef.isPremium
+          : undefined,
+    premiumExpiryDate:
+      candidate.premiumExpiryDate ??
+      (accountRef?.premiumExpiryDate == null
+        ? undefined
+        : accountRef.premiumExpiryDate),
+  } satisfies User;
+};
+
+const sendAccountLockOtp = async () => {
+  const { data } = await api.post<OtpResponse>("/auth/account-lock/send-otp");
+  return data;
+};
+
+const verifyAccountLockOtp = async (payload: VerifyAccountLockOtpPayload) => {
+  const { data } = await api.post<VerifyAccountLockOtpResponse>(
+    "/auth/account-lock/verify-otp",
+    payload,
+  );
+  return data;
+};
+
+const confirmAccountLock = async (payload: ConfirmAccountLockPayload) => {
+  const { data } = await api.post<OtpResponse>("/auth/account-lock/confirm", payload);
+  return data;
+};
+
+const sendAccountUnlockOtp = async (payload: SendAccountUnlockOtpPayload) => {
+  const { data } = await api.post<OtpResponse>(
+    "/auth/account-unlock/send-otp",
+    payload,
+  );
+  return data;
+};
+
+const confirmAccountUnlock = async (payload: ConfirmAccountUnlockPayload) => {
+  const { data } = await api.post<OtpResponse>(
+    "/auth/account-unlock/confirm",
+    payload,
+  );
+  return data;
+};
+
+export const authService = {
+  login,
+  sendOtp,
+  verifyOtp,
+  register,
+  getMe,
+  rememberedLogin,
+  getRememberedAccountInfo,
+  revokeRememberedAccount,
+  sendAccountLockOtp,
+  verifyAccountLockOtp,
+  confirmAccountLock,
+  sendAccountUnlockOtp,
+  confirmAccountUnlock,
+};
