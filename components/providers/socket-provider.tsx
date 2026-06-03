@@ -317,34 +317,59 @@ const removeConversationFromList = (
   };
 };
 
+const getSharedAudioContext = () => {
+  if (typeof window === "undefined") return null;
+  const w = window as any;
+  if (!w.__sharedAudioContext) {
+    const AudioContextClass = w.AudioContext || w.webkitAudioContext;
+    if (AudioContextClass) {
+      w.__sharedAudioContext = new AudioContextClass();
+    }
+  }
+  return w.__sharedAudioContext;
+};
+
+if (typeof window !== "undefined") {
+  const resume = () => {
+    const ctx = getSharedAudioContext();
+    if (ctx && ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+  };
+  window.addEventListener("click", resume);
+  window.addEventListener("touchstart", resume);
+  window.addEventListener("keydown", resume);
+}
+
 const playNotificationSound = () => {
   try {
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
-    const now = ctx.currentTime;
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
 
-    const osc1 = ctx.createOscillator();
-    const osc2 = ctx.createOscillator();
+    if (ctx.state === "suspended") {
+      void ctx.resume().catch(() => {});
+    }
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();
 
-    osc1.type = "sine";
-    osc1.frequency.setValueAtTime(2500, now);
-
-    osc2.type = "sine";
-    osc2.frequency.setValueAtTime(3200, now);
+    osc.type = "triangle";
+    // Quick pleasant arpeggio (C5 -> E5 -> G5 -> C6)
+    osc.frequency.setValueAtTime(523.25, now); // C5
+    osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
+    osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
+    osc.frequency.setValueAtTime(1046.50, now + 0.24); // C6
 
     gainNode.gain.setValueAtTime(0.15, now);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    gainNode.gain.setValueAtTime(0.15, now + 0.24);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
 
-    osc1.connect(gainNode);
-    osc2.connect(gainNode);
+    osc.connect(gainNode);
     gainNode.connect(ctx.destination);
 
-    osc1.start(now);
-    osc2.start(now);
-    osc1.stop(now + 0.12);
-    osc2.stop(now + 0.12);
+    osc.start(now);
+    osc.stop(now + 0.6);
   } catch (error) {
     console.error("Failed to play notification sound via Web Audio API:", error);
   }
@@ -477,6 +502,13 @@ export function SocketProvider({ children }: SocketProviderProps) {
     socketInstance.on("conversation:created", handleConversationCreatedOrUpdated);
     socketInstance.on("conversation:updated", handleConversationCreatedOrUpdated);
     socketInstance.on("conversation:deleted", handleConversationDeleted);
+    socketInstance.on("user:profile-updated", () => {
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      queryClient.invalidateQueries({ queryKey: ["user"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["presigned-url"] });
+    });
     const handledRealtimeMessageIds = new Set<string>();
 
     const handleRealtimeMessage = (payload: RealtimeMessagePayload) => {

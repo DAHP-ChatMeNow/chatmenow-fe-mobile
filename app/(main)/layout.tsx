@@ -15,6 +15,8 @@ const mobileBrandFont = Archivo_Black({
   subsets: ["latin"],
 });
 
+import { useSwipeBack } from "@/hooks/use-swipe-back";
+
 export default function MainLayout({
   children,
 }: {
@@ -33,6 +35,7 @@ export default function MainLayout({
   // Auto-sync user profile từ server (chạy mỗi 30s và khi focus window)
   useUserProfile();
   useMe();
+  useSwipeBack();
 
   useEffect(() => {
     // Client-side route protection fallback

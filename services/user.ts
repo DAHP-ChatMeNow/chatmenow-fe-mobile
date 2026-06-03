@@ -1,5 +1,6 @@
 import api from "@/lib/axios";
 import { User, AccountStatus, MessageReceiveSetting } from "@/types/user";
+import { uploadFileToS3 } from "@/lib/upload-helper";
 
 export interface UpdateProfilePayload {
   displayName?: string;
@@ -216,18 +217,16 @@ export const userService = {
    * @param file - Avatar image file
    */
   uploadAvatar: async (file: File) => {
-    const formData = new FormData();
-    formData.append("image", file);
-    const res = await api.post<UploadAvatarResponse>(
-      "/upload/avatar",
-      formData,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      },
-    );
-    return res.data;
+    const key = await uploadFileToS3(file, "avatars");
+    const res = await api.put<UpdateProfileResponse>("/users/avatar", {
+      avatar: key,
+    });
+    return {
+      success: true,
+      message: res.data.message,
+      user: res.data.user,
+      avatar: key,
+    };
   },
 
   /**
@@ -256,17 +255,10 @@ export const userService = {
    * @param file - Avatar image file
    */
   updateAvatar: async (file: File) => {
-    const formData = new FormData();
-    formData.append("avatar", file);
-    const res = await api.put<UpdateProfileResponse>(
-      "/users/avatar",
-      formData,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      },
-    );
+    const key = await uploadFileToS3(file, "avatars");
+    const res = await api.put<UpdateProfileResponse>("/users/avatar", {
+      avatar: key,
+    });
     return res.data;
   },
 
@@ -275,19 +267,16 @@ export const userService = {
    * @param file - Cover image file
    */
   updateCoverImage: async (file: File) => {
-    const formData = new FormData();
-    // Keep the same multipart field as avatar upload for multer.single("image").
-    formData.append("image", file);
-    const res = await api.post<UploadCoverImageResponse>(
-      "/upload/cover-image",
-      formData,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      },
-    );
-    return res.data;
+    const key = await uploadFileToS3(file, "covers");
+    const res = await api.put<UpdateProfileResponse>("/users/cover-image", {
+      coverImage: key,
+    });
+    return {
+      success: true,
+      message: res.data.message,
+      user: res.data.user,
+      coverImage: key,
+    };
   },
 
   /**

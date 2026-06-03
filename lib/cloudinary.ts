@@ -4,11 +4,34 @@
  * @param maxSizeMB - Max file size in MB (default: 5)
  * @returns true if valid
  */
+const getMimetypeFromExtension = (filename: string): string => {
+  if (!filename) return "";
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    default:
+      return "";
+  }
+};
+
 export const validateImageFile = (file: File, maxSizeMB: number = 5): boolean => {
   const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
   const maxBytes = maxSizeMB * 1024 * 1024;
 
-  if (!validTypes.includes(file.type)) {
+  let fileType = file.type;
+  if (!fileType || fileType === "application/octet-stream" || fileType === "") {
+    fileType = getMimetypeFromExtension(file.name);
+  }
+
+  if (!validTypes.includes(fileType)) {
     throw new Error('Loại tệp không hợp lệ. Chỉ JPEG, PNG, WebP và GIF được phép.');
   }
 

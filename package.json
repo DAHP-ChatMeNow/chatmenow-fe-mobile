@@ -16,6 +16,7 @@
     "@capacitor/android": "^6.2.1",
     "@capacitor/cli": "^6.2.1",
     "@capacitor/core": "^6.2.1",
+    "@capacitor/geolocation": "^6.0.0",
     "@capacitor/ios": "^6.2.1",
     "@capacitor/preferences": "^6.0.0",
     "@hookform/resolvers": "^5.2.2",

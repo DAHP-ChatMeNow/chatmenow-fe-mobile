@@ -115,6 +115,8 @@ import {
 import { toast } from "sonner";
 import { QRCodeCanvas } from "qrcode.react";
 import { buildPublicAppUrl } from "@/types/utils";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Scanner } from "@yudiel/react-qr-scanner";
 
 type ChatBackgroundKey = "default" | "sky" | "sunset" | "mint" | "night";
 
@@ -783,7 +785,7 @@ export function ChatHeader({
 
   const groupShareLink = useMemo(() => {
     if (!currentId) return "";
-    return buildPublicAppUrl(`/messages?conversationId=${currentId}`);
+    return buildPublicAppUrl(`/join-group?conversationId=${currentId}`);
   }, [currentId]);
 
   const groupCardPayload = useMemo<GroupCardPayload | null>(() => {
@@ -794,7 +796,7 @@ export function ChatHeader({
       displayName,
       avatar: headerAvatarKey || undefined,
       memberCount: conversation?.members?.length || groupMembers.length + 1,
-      profileUrl: buildPublicAppUrl(`/messages?conversationId=${currentId}`),
+      profileUrl: buildPublicAppUrl(`/join-group?conversationId=${currentId}`),
     };
   }, [
     conversation?.members?.length,
@@ -1140,7 +1142,7 @@ export function ChatHeader({
             {conversation?.type === "group" && (
               <button
                 type="button"
-                onClick={() => setInviteOpen(true)}
+                onClick={() => setGroupShareOpen(true)}
                 className="rounded-xl border border-transparent p-2.5 text-slate-400 transition-all duration-200 hover:scale-105 hover:border-blue-100 hover:bg-blue-50 hover:text-blue-600"
                 title="Thêm thành viên"
               >
@@ -1477,6 +1479,19 @@ export function ChatHeader({
         sendingGroupCard={isSendingGroupCard}
         onCopyLink={handleCopyGroupLink}
         onShareLink={handleShareGroupLink}
+        inviteContacts={inviteContacts}
+        inviteSelectedIds={inviteSelectedIds}
+        setInviteSelectedIds={setInviteSelectedIds}
+        onInviteDirectly={async () => {
+          if (inviteSelectedIds.length === 0 || !currentId) return;
+          await addMemberMutation.mutateAsync({
+            conversationId: currentId,
+            memberIds: inviteSelectedIds,
+          });
+          setInviteSelectedIds([]);
+          setGroupShareOpen(false);
+        }}
+        invitingDirectly={addMemberMutation.isPending}
       />
       <GroupSettingsDrawer
         open={groupDrawerOpen}
@@ -1496,7 +1511,7 @@ export function ChatHeader({
         members={groupMembers}
         isAdmin={isAdmin}
         canInviteMembers={Boolean(conversation?.type === "group")}
-        onInviteMembers={() => setInviteOpen(true)}
+        onInviteMembers={() => setGroupShareOpen(true)}
         onInviteByLink={handleInviteByLink}
         onOpenShareGroup={() => setGroupShareOpen(true)}
         pendingJoinRequests={pendingJoinRequests}
@@ -2707,6 +2722,11 @@ function GroupShareDialog({
   sendingGroupCard,
   onCopyLink,
   onShareLink,
+  inviteContacts = [],
+  inviteSelectedIds = [],
+  setInviteSelectedIds,
+  onInviteDirectly,
+  invitingDirectly,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -2721,7 +2741,16 @@ function GroupShareDialog({
   sendingGroupCard: boolean;
   onCopyLink: () => void;
   onShareLink: () => void;
+  inviteContacts?: User[];
+  inviteSelectedIds?: string[];
+  setInviteSelectedIds?: Dispatch<SetStateAction<string[]>>;
+  onInviteDirectly?: () => void;
+  invitingDirectly?: boolean;
 }) {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState("qr");
+  const [inviteQuery, setInviteQuery] = useState("");
+
   const filteredContacts = useMemo(() => {
     const query = recipientQuery.trim().toLowerCase();
     if (!query) return contacts;
@@ -2733,175 +2762,337 @@ function GroupShareDialog({
     });
   }, [contacts, recipientQuery]);
 
+  const filteredInviteContacts = useMemo(() => {
+    const query = inviteQuery.trim().toLowerCase();
+    if (!query) return inviteContacts;
+
+    return inviteContacts.filter((contact) => {
+      const displayName = contact.displayName.toLowerCase();
+      const email = (contact.email || "").toLowerCase();
+      return displayName.includes(query) || email.includes(query);
+    });
+  }, [inviteContacts, inviteQuery]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Chia sẻ nhóm</DialogTitle>
+      <DialogContent className="sm:max-w-2xl max-w-[96vw] max-h-[92vh] flex flex-col p-6 overflow-hidden">
+        <DialogHeader className="pb-2 border-b">
+          <DialogTitle className="text-xl font-bold text-slate-800">
+            Mời & Chia sẻ nhóm
+          </DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
-          <div className="p-4 border rounded-3xl border-slate-200 bg-slate-50">
-            <div className="flex items-center justify-center p-4 bg-white border rounded-2xl border-slate-200">
-              {shareUrl ? (
-                <QRCodeCanvas value={shareUrl} size={168} includeMargin />
-              ) : (
-                <div className="flex h-[168px] items-center justify-center text-sm text-slate-400">
-                  Thiếu link nhóm
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 mt-4">
+          <TabsList className="grid w-full grid-cols-3 bg-slate-100 p-1 rounded-xl">
+            <TabsTrigger value="qr" className="flex items-center gap-1.5 py-2.5 rounded-lg text-sm font-medium transition-all">
+              Mã QR Nhóm
+            </TabsTrigger>
+            <TabsTrigger value="scan" className="flex items-center gap-1.5 py-2.5 rounded-lg text-sm font-medium transition-all">
+              Quét QR
+            </TabsTrigger>
+            <TabsTrigger value="invite" className="flex items-center gap-1.5 py-2.5 rounded-lg text-sm font-medium transition-all">
+              Mời trực tiếp
+            </TabsTrigger>
+          </TabsList>
+
+          <div className="flex-1 min-h-0 overflow-y-auto mt-4 pr-1">
+            {/* Tab 1: QR & Share Card */}
+            <TabsContent value="qr" className="m-0 space-y-5 focus-visible:outline-none">
+              <div className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
+                <div className="flex flex-col items-center p-4 border rounded-2xl bg-slate-50 border-slate-150">
+                  <div className="flex items-center justify-center p-3 bg-white border rounded-xl border-slate-200 shadow-sm">
+                    {shareUrl ? (
+                      <QRCodeCanvas value={shareUrl} size={150} includeMargin />
+                    ) : (
+                      <div className="flex h-[150px] items-center justify-center text-sm text-slate-400">
+                        Thiếu link nhóm
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-4 space-y-2 w-full">
+                    <Button
+                      type="button"
+                      className="w-full h-10 shadow-sm"
+                      onClick={onShareLink}
+                      disabled={!shareUrl}
+                    >
+                      <Share2 className="w-4 h-4 mr-2" />
+                      Chia sẻ link
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full h-10 bg-white shadow-sm border-slate-200 hover:bg-slate-50"
+                      onClick={onCopyLink}
+                      disabled={!shareUrl}
+                    >
+                      <Copy className="w-4 h-4 mr-2" />
+                      Sao chép link
+                    </Button>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            <div className="mt-3 space-y-3">
-              <Button
-                type="button"
-                className="w-full"
-                onClick={onShareLink}
-                disabled={!shareUrl}
-              >
-                <Share2 className="w-4 h-4 mr-2" />
-                Chia sẻ link
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={onCopyLink}
-                disabled={!shareUrl}
-              >
-                <Copy className="w-4 h-4 mr-2" />
-                Sao chép link
-              </Button>
-            </div>
+                <div className="space-y-4">
+                  <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-100">
+                    <div className="text-sm font-semibold text-slate-900">
+                      Gửi danh thiếp nhóm
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1 leading-normal">
+                      Chọn 1 hoặc nhiều liên hệ để gửi card nhóm vào cuộc trò chuyện riêng.
+                    </div>
+                  </div>
 
-            {groupCardPayload && (
-              <div className="p-3 mt-4 bg-white border shadow-sm rounded-2xl border-slate-200">
-                <div className="flex items-center gap-3">
-                  <PresignedAvatar
-                    avatarKey={groupCardPayload.avatar}
-                    displayName={groupCardPayload.displayName}
-                    className="h-11 w-11"
-                    fallbackClassName="bg-gradient-to-br from-blue-500 to-cyan-500 text-white"
+                  <Input
+                    value={recipientQuery}
+                    onChange={(event) => onRecipientQueryChange(event.target.value)}
+                    placeholder="Tìm liên hệ để gửi..."
+                    className="bg-white h-11 rounded-xl border-slate-250"
                   />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold truncate text-slate-900">
-                      {groupCardPayload.displayName}
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      {groupCardPayload.memberCount || 0} thành viên
-                    </div>
-                  </div>
-                </div>
-                <div className="px-3 py-2 mt-3 text-xs rounded-xl bg-slate-50 text-slate-500">
-                  Danh thiếp nhóm có thể gửi cho người khác để mở nhanh cuộc trò
-                  chuyện.
-                </div>
-              </div>
-            )}
-          </div>
 
-          <div className="space-y-3">
-            <div>
-              <div className="text-sm font-medium text-slate-700">
-                Gửi danh thiếp nhóm
-              </div>
-              <div className="mt-2 text-xs text-slate-500">
-                Chọn 1 hoặc nhiều liên hệ để gửi card nhóm vào cuộc trò chuyện
-                riêng.
-              </div>
-            </div>
-
-            <Input
-              value={recipientQuery}
-              onChange={(event) => onRecipientQueryChange(event.target.value)}
-              placeholder="Tìm liên hệ..."
-              className="bg-white h-11 rounded-2xl border-slate-200"
-            />
-
-            <ScrollArea className="h-[280px] rounded-2xl border border-slate-200 bg-white">
-              <div className="p-2 space-y-1">
-                {filteredContacts.length === 0 ? (
-                  <div className="px-3 py-8 text-sm text-center text-slate-500">
-                    Không có liên hệ phù hợp
-                  </div>
-                ) : (
-                  filteredContacts.map((contact) => {
-                    const id = contact._id || contact.id;
-                    if (!id) return null;
-                    const checked = selectedIds.includes(id);
-
-                    return (
-                      <label
-                        key={id}
-                        className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-slate-50"
-                      >
-                        <input
-                          type="checkbox"
-                          className="w-4 h-4"
-                          checked={checked}
-                          onChange={(event) => {
-                            setSelectedIds((prev) =>
-                              event.target.checked
-                                ? [...prev, id]
-                                : prev.filter((item) => item !== id),
-                            );
-                          }}
-                        />
-                        {contact.avatar ? (
-                          <img
-                            src={contact.avatar}
-                            alt={contact.displayName}
-                            className="object-cover rounded-full h-9 w-9"
-                          />
-                        ) : (
-                          <div className="rounded-full h-9 w-9 bg-slate-200" />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium truncate text-slate-900">
-                            {contact.displayName}
-                          </div>
-                          <div className="text-xs truncate text-slate-500">
-                            {contact.email || "Liên hệ"}
-                          </div>
+                  <ScrollArea className="h-[180px] rounded-xl border border-slate-200 bg-white">
+                    <div className="p-2 space-y-1">
+                      {filteredContacts.length === 0 ? (
+                        <div className="px-3 py-8 text-sm text-center text-slate-500">
+                          Không có liên hệ phù hợp
                         </div>
-                      </label>
-                    );
-                  })
-                )}
-              </div>
-            </ScrollArea>
+                      ) : (
+                        filteredContacts.map((contact) => {
+                          const id = contact._id || contact.id;
+                          if (!id) return null;
+                          const checked = selectedIds.includes(id);
 
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={sendingGroupCard}
-              >
-                Hủy
-              </Button>
-              <Button
-                onClick={onSendGroupCard}
-                disabled={
-                  selectedIds.length === 0 ||
-                  sendingGroupCard ||
-                  !groupCardPayload
-                }
-              >
-                {sendingGroupCard ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Đang gửi...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4 mr-2" />
-                    Gửi danh thiếp
-                  </>
+                          return (
+                            <label
+                              key={id}
+                              className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-slate-50"
+                            >
+                              <input
+                                type="checkbox"
+                                className="w-4 h-4 rounded border-slate-300"
+                                checked={checked}
+                                onChange={(event) => {
+                                  setSelectedIds((prev) =>
+                                    event.target.checked
+                                      ? [...prev, id]
+                                      : prev.filter((item) => item !== id),
+                                  );
+                                }}
+                              />
+                              <PresignedAvatar
+                                avatarKey={contact.avatar}
+                                displayName={contact.displayName}
+                                className="h-8 w-8"
+                                fallbackClassName="bg-slate-200 text-slate-600"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium truncate text-slate-900">
+                                  {contact.displayName}
+                                </div>
+                                <div className="text-xs truncate text-slate-400">
+                                  {contact.email || "Liên hệ"}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  </ScrollArea>
+
+                  <div className="flex justify-end gap-2 pt-1 border-t">
+                    <Button
+                      onClick={onSendGroupCard}
+                      disabled={selectedIds.length === 0 || sendingGroupCard || !groupCardPayload}
+                      className="h-10 px-5 shadow-sm"
+                    >
+                      {sendingGroupCard ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Đang gửi...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4 mr-2" />
+                          Gửi ({selectedIds.length})
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Tab 2: Scan Group QR */}
+            <TabsContent value="scan" className="m-0 space-y-4 focus-visible:outline-none">
+              <div className="flex flex-col items-center justify-center">
+                <div className="relative overflow-hidden bg-black rounded-2xl w-full max-w-[340px] aspect-square flex items-center justify-center border-4 border-slate-200 shadow-md animate-in fade-in zoom-in-95 duration-255">
+                  {activeTab === "scan" && open && (
+                    <Scanner
+                      onScan={(result) => {
+                        if (result && result.length > 0) {
+                          const text = result[0].rawValue;
+                          let scannedConvId: string | null = null;
+                          if (text.startsWith("chatmenow:join-group:")) {
+                            scannedConvId = text.replace("chatmenow:join-group:", "");
+                          } else if (text.startsWith("http://") || text.startsWith("https://")) {
+                            try {
+                              const url = new URL(text);
+                              scannedConvId = url.searchParams.get("conversationId");
+                            } catch (e) {
+                              console.error("Failed to parse QR URL:", e);
+                            }
+                          }
+                          if (scannedConvId) {
+                            toast.success("Đã nhận diện mã nhóm!");
+                            router.push(`/messages?conversationId=${scannedConvId}`);
+                            onOpenChange(false);
+                          } else {
+                            toast.error("Mã QR không đúng định dạng nhóm");
+                          }
+                        }
+                      }}
+                      formats={["qr_code"]}
+                      styles={{
+                        container: { width: '100%', height: '100%' },
+                      }}
+                    />
+                  )}
+                </div>
+                <p className="text-center text-sm text-slate-500 mt-4 bg-slate-50 px-4 py-2 rounded-full border border-slate-100">
+                  Hướng camera vào mã QR nhóm để truy cập nhanh
+                </p>
+              </div>
+            </TabsContent>
+
+            {/* Tab 3: Direct Invite */}
+            <TabsContent value="invite" className="m-0 space-y-4 focus-visible:outline-none">
+              <div className="space-y-4">
+                <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-100">
+                  <div className="text-sm font-semibold text-slate-900">
+                    Thêm trực tiếp vào cuộc trò chuyện
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1 leading-normal">
+                    Chọn bạn bè từ danh sách liên hệ của bạn để mời trực tiếp vào cuộc trò chuyện nhóm này.
+                  </div>
+                </div>
+
+                <Input
+                  value={inviteQuery}
+                  onChange={(e) => setInviteQuery(e.target.value)}
+                  placeholder="Tìm kiếm bạn bè..."
+                  className="bg-white h-11 rounded-xl border-slate-250"
+                />
+
+                {/* Selected members list horizontal scroll */}
+                {inviteSelectedIds.length > 0 && (
+                  <div className="flex gap-2.5 py-2 px-1 overflow-x-auto border-y border-slate-100 min-h-[52px] items-center">
+                    {inviteSelectedIds.map((id) => {
+                      const contact = inviteContacts.find((c) => (c._id || c.id) === id);
+                      if (!contact) return null;
+                      return (
+                        <div
+                          key={id}
+                          className="flex items-center gap-1.5 bg-blue-50 text-blue-700 pl-1.5 pr-2 py-1 rounded-full text-xs shrink-0 font-semibold border border-blue-100"
+                        >
+                          <PresignedAvatar
+                            avatarKey={contact.avatar}
+                            displayName={contact.displayName}
+                            className="h-5 w-5 border border-white"
+                            fallbackClassName="text-[8px] font-semibold"
+                          />
+                          <span className="max-w-[90px] truncate">{contact.displayName}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (setInviteSelectedIds) {
+                                setInviteSelectedIds((prev) => prev.filter((item) => item !== id));
+                              }
+                            }}
+                            className="hover:text-red-500 text-[16px] leading-none ml-1 font-bold"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
-              </Button>
-            </DialogFooter>
+
+                <ScrollArea className="h-[180px] rounded-xl border border-slate-200 bg-white">
+                  <div className="p-2 space-y-1">
+                    {filteredInviteContacts.length === 0 ? (
+                      <div className="px-3 py-8 text-sm text-center text-slate-500">
+                        Không có bạn bè phù hợp hoặc tất cả đã tham gia nhóm
+                      </div>
+                    ) : (
+                      filteredInviteContacts.map((contact) => {
+                        const id = contact._id || contact.id;
+                        if (!id) return null;
+                        const checked = inviteSelectedIds.includes(id);
+
+                        return (
+                          <label
+                            key={id}
+                            className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-slate-50"
+                          >
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4 rounded border-slate-300"
+                              checked={checked}
+                              onChange={(event) => {
+                                if (setInviteSelectedIds) {
+                                  setInviteSelectedIds((prev) =>
+                                    event.target.checked
+                                      ? [...prev, id]
+                                      : prev.filter((item) => item !== id),
+                                  );
+                                }
+                              }}
+                            />
+                            <PresignedAvatar
+                              avatarKey={contact.avatar}
+                              displayName={contact.displayName}
+                              className="h-8 w-8"
+                              fallbackClassName="bg-slate-200 text-slate-600"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate text-slate-900">
+                                {contact.displayName}
+                              </div>
+                              <div className="text-xs truncate text-slate-400">
+                                {contact.email || "Liên hệ"}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </ScrollArea>
+
+                <div className="flex justify-end gap-2 pt-1 border-t">
+                  <Button
+                    onClick={onInviteDirectly}
+                    disabled={inviteSelectedIds.length === 0 || invitingDirectly}
+                    className="w-full h-10 px-5 shadow-sm font-medium"
+                  >
+                    {invitingDirectly ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Đang thêm vào nhóm...
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-4 h-4 mr-2" />
+                        Mời vào nhóm ({inviteSelectedIds.length})
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </TabsContent>
           </div>
-        </div>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );
