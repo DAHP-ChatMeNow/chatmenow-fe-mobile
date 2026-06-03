@@ -4,7 +4,8 @@ import { UserPlus, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useContacts, useFriendRequests } from "@/hooks/use-contact";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { FriendRequestsList } from "@/components/contact/friend-requests-list";
 import { SearchAndAddFriend } from "@/components/contact/search-and-add-friend";
 import { FriendsList } from "@/components/contact/friends-list";
@@ -19,6 +20,15 @@ export default function ContactsPage() {
   const [showRequests, setShowRequests] = useState(false);
   const [showSearchDialog, setShowSearchDialog] = useState(false);
   const [showQRDialog, setShowQRDialog] = useState(false);
+
+  const searchParams = useSearchParams();
+  const searchParamValue = searchParams.get("search");
+
+  useEffect(() => {
+    if (searchParamValue) {
+      setShowSearchDialog(true);
+    }
+  }, [searchParamValue]);
 
   const contacts = contactsData?.contacts || [];
   const friendRequests = friendRequestsData?.requests || [];
@@ -114,6 +124,7 @@ export default function ContactsPage() {
       <SearchAndAddFriend 
         open={showSearchDialog} 
         onOpenChange={setShowSearchDialog} 
+        initialQuery={searchParamValue || ""}
       />
 
       {/* QR Code Dialog */}

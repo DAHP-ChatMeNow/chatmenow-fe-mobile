@@ -13,7 +13,7 @@ import { io, Socket } from "socket.io-client";
 import { useAuthStore } from "@/store/use-auth-store";
 import { useQueryClient } from "@tanstack/react-query";
 import { BASE_SOCKET_URL } from "@/types/utils";
-import { Notification } from "@/types/notification";
+import { type Notification } from "@/types/notification";
 import {
   normalizeNotification,
   NotificationsResponse,
@@ -317,6 +317,49 @@ const removeConversationFromList = (
   };
 };
 
+const playNotificationSound = () => {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const now = ctx.currentTime;
+
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(2500, now);
+
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(3200, now);
+
+    gainNode.gain.setValueAtTime(0.15, now);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+    osc1.connect(gainNode);
+    osc2.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.12);
+    osc2.stop(now + 0.12);
+  } catch (error) {
+    console.error("Failed to play notification sound via Web Audio API:", error);
+  }
+};
+
+const showLocalNotification = (title: string, options?: any) => {
+  if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+    try {
+      new window.Notification(title, options);
+    } catch (e) {
+      console.error("Failed to show local notification:", e);
+    }
+  }
+};
+
 export function SocketProvider({ children }: SocketProviderProps) {
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -329,6 +372,12 @@ export function SocketProvider({ children }: SocketProviderProps) {
 
     if (!token || !userId) {
       return;
+    }
+
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission();
+      }
     }
 
     if (!SOCKET_URL) {
@@ -447,6 +496,15 @@ export function SocketProvider({ children }: SocketProviderProps) {
       const isIncomingMessage = Boolean(
         userId && messageSenderId && messageSenderId !== userId,
       );
+
+      if (isIncomingMessage) {
+        playNotificationSound();
+        const senderDisplayName = (message.senderId as any)?.displayName || (message as any).senderName || "Tin nhắn mới";
+        showLocalNotification(senderDisplayName, {
+          body: message.content || (message.type === "image" ? "[Hình ảnh]" : message.type === "file" ? "[Tài liệu]" : "Bạn có một tin nhắn mới"),
+          icon: "/favicon.ico",
+        });
+      }
 
       queryClient.setQueryData(
         ["messages", message.conversationId],
@@ -731,6 +789,15 @@ export function SocketProvider({ children }: SocketProviderProps) {
         ["notifications"],
         (oldData) => mergeRealtimeNotification(oldData, notification),
       );
+
+      const senderId = notification.senderId || (notification as any).sender?._id;
+      if (senderId && senderId !== userId) {
+        playNotificationSound();
+        showLocalNotification((notification as any).title || "Thông báo mới", {
+          body: notification.content || "Bạn có một thông báo mới",
+          icon: "/favicon.ico",
+        });
+      }
     };
 
     socketInstance.on("notification:new", handleNotification);
@@ -796,6 +863,31 @@ export function SocketProvider({ children }: SocketProviderProps) {
       queryClient.invalidateQueries({ queryKey: ["feed"] });
     });
 
+    const handleUserProfileUpdated = (payload: any) => {
+      if (!payload?.userId) return;
+      queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["friend-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["partner"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["messages"] });
+    };
+
+    const handleStoryChanged = () => {
+      queryClient.invalidateQueries({ queryKey: ["stories"] });
+    };
+
+    const handleReelChanged = () => {
+      queryClient.invalidateQueries({ queryKey: ["reel-feed"] });
+      queryClient.invalidateQueries({ queryKey: ["my-reels"] });
+    };
+
+    socketInstance.on("user:profile-updated", handleUserProfileUpdated);
+    socketInstance.on("story:new", handleStoryChanged);
+    socketInstance.on("story:deleted", handleStoryChanged);
+    socketInstance.on("reel:new", handleReelChanged);
+    socketInstance.on("reel:deleted", handleReelChanged);
+
     socketRef.current = socketInstance;
 
     return () => {
@@ -824,6 +916,11 @@ export function SocketProvider({ children }: SocketProviderProps) {
       socketInstance.off("notification:new");
       socketInstance.off("user:presence", handleUserPresence);
       socketInstance.off("post:liked");
+      socketInstance.off("user:profile-updated", handleUserProfileUpdated);
+      socketInstance.off("story:new", handleStoryChanged);
+      socketInstance.off("story:deleted", handleStoryChanged);
+      socketInstance.off("reel:new", handleReelChanged);
+      socketInstance.off("reel:deleted", handleReelChanged);
       socketInstance.offAny();
       socketInstance.disconnect();
       socketRef.current = null;

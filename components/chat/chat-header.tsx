@@ -103,6 +103,8 @@ import {
 import { isShareCardSource } from "@/lib/share-card";
 import { User } from "@/types/user";
 import { UnreadSummaryDialog } from "@/components/chat/unread-summary-dialog";
+import { Capacitor } from "@capacitor/core";
+import { Preferences } from "@capacitor/preferences";
 import { usePresignedUrl } from "@/hooks/use-profile";
 import {
   chatService,
@@ -878,16 +880,23 @@ export function ChatHeader({
      router.push(`/profile?userId=${partnerId}`);
   };
 
-  const openBackgroundPicker = () => {
-    if (typeof window !== "undefined" && currentId) {
-      const saved = localStorage.getItem(
-        `chat-background:${currentId}`,
-      ) as ChatBackgroundKey | null;
-      if (
-        saved &&
-        CHAT_BACKGROUND_OPTIONS.some((option) => option.key === saved)
-      ) {
-        setSelectedBackground(saved);
+  const openBackgroundPicker = async () => {
+    if (currentId && typeof window !== "undefined") {
+      let saved: string | null = null;
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const res = await Preferences.get({ key: `chat-background:${currentId}` });
+          saved = res.value;
+        } catch (e) {
+          console.error("Preferences.get error:", e);
+        }
+      }
+      if (!saved) {
+        saved = localStorage.getItem(`chat-background:${currentId}`);
+      }
+
+      if (saved && CHAT_BACKGROUND_OPTIONS.some((option) => option.key === saved)) {
+        setSelectedBackground(saved as ChatBackgroundKey);
       } else {
         setSelectedBackground("default");
       }
@@ -895,9 +904,19 @@ export function ChatHeader({
     setBackgroundOpen(true);
   };
 
-  const handleSelectBackground = (background: ChatBackgroundKey) => {
+  const handleSelectBackground = async (background: ChatBackgroundKey) => {
     if (!currentId || typeof window === "undefined") return;
 
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await Preferences.set({
+          key: `chat-background:${currentId}`,
+          value: background,
+        });
+      } catch (e) {
+        console.error("Preferences.set error:", e);
+      }
+    }
     localStorage.setItem(`chat-background:${currentId}`, background);
     setSelectedBackground(background);
     window.dispatchEvent(
@@ -1137,7 +1156,7 @@ export function ChatHeader({
               <DropdownMenuContent
                 align="end"
                 sideOffset={8}
-                className="p-2 border shadow-xl w-72 rounded-2xl border-slate-200/80 bg-white/95 backdrop-blur-md"
+                className="p-2 border shadow-xl w-72 rounded-2xl border-slate-200/80 bg-white/95 backdrop-blur-md max-h-[75vh] overflow-y-auto"
               >
                 <DropdownMenuLabel className="px-3 pb-2 pt-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">
                   Tùy chọn chat
@@ -1361,6 +1380,7 @@ export function ChatHeader({
         conversationId={currentId}
         messages={messages}
         pinnedMessages={pinnedMessages}
+        isLoadingMessages={!messagesData}
         canManagePinned={
           conversation?.type !== "group" ||
           !conversation?.pinManagementEnabled ||
@@ -1855,6 +1875,7 @@ function MessagesSideSheet({
   searchQuery,
   onSearchQueryChange,
   title,
+  isLoadingMessages,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -1866,6 +1887,7 @@ function MessagesSideSheet({
   searchQuery: string;
   onSearchQueryChange: (v: string) => void;
   title: string;
+  isLoadingMessages?: boolean;
 }) {
   const [assetView, setAssetView] = useState<"images" | "files" | "links">(
     "images",
@@ -2086,7 +2108,7 @@ function MessagesSideSheet({
   );
 
   useEffect(() => {
-    if (!cacheKey || typeof window === "undefined") return;
+    if (!cacheKey || typeof window === "undefined" || isLoadingMessages) return;
 
     const payload: SideSheetCache = {
       files: fileMsgs.slice(0, 500),
@@ -2094,7 +2116,7 @@ function MessagesSideSheet({
     };
 
     window.localStorage.setItem(cacheKey, JSON.stringify(payload));
-  }, [cacheKey, fileMsgs, linkMsgs]);
+  }, [cacheKey, fileMsgs, linkMsgs, isLoadingMessages]);
 
   const searchMsgs = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
