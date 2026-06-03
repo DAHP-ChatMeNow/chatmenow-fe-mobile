@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Search, UserPlus, Loader, X, MapPin, GraduationCap, History, Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,7 @@ const VIETNAM_CITIES = [
 interface SearchAndAddFriendProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialQuery?: string;
 }
 
 function SearchResultItem({
@@ -103,8 +104,17 @@ function SearchResultItem({
 export function SearchAndAddFriend({
   open,
   onOpenChange,
+  initialQuery = "",
 }: SearchAndAddFriendProps) {
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  
+  // Sync state with initialQuery when prop changes
+  useEffect(() => {
+    if (initialQuery) {
+      setSearchQuery(initialQuery);
+    }
+  }, [initialQuery]);
+
   const [cityFilter, setCityFilter] = useState("");
   const [schoolFilter, setSchoolFilter] = useState("");
   const router = useRouter();

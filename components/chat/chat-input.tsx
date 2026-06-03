@@ -12,6 +12,7 @@ import {
   Square,
   X,
   BarChart2,
+  Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -86,6 +87,7 @@ export function ChatInput({
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [emojiDialogOpen, setEmojiDialogOpen] = useState(false);
   const [isSendingAttachment, setIsSendingAttachment] = useState(false);
+  const [mobileExtensionsOpen, setMobileExtensionsOpen] = useState(false);
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionStartIndex, setMentionStartIndex] = useState<number | null>(null);
@@ -308,6 +310,34 @@ export function ChatInput({
     startRecording,
   ]);
 
+  const handleMobileSelectImage = () => {
+    setMobileExtensionsOpen(false);
+    setTimeout(() => {
+      imageInputRef.current?.click();
+    }, 100);
+  };
+
+  const handleMobileSelectFile = () => {
+    setMobileExtensionsOpen(false);
+    setTimeout(() => {
+      fileInputRef.current?.click();
+    }, 100);
+  };
+
+  const handleMobileMic = () => {
+    setMobileExtensionsOpen(false);
+    setTimeout(() => {
+      handleMicClick();
+    }, 100);
+  };
+
+  const handleMobilePoll = () => {
+    setMobileExtensionsOpen(false);
+    setTimeout(() => {
+      onOpenPollDialog?.();
+    }, 100);
+  };
+
   const handleEmojiClick = useCallback((emojiObject: { emoji: string }) => {
     setValue((current) => `${current}${emojiObject.emoji}`);
     setEmojiDialogOpen(false);
@@ -495,8 +525,16 @@ export function ChatInput({
         <div className="flex items-center gap-2">
           <button
             disabled={disabled}
+            onClick={() => setMobileExtensionsOpen(true)}
+            className="rounded-xl p-2.5 text-slate-400 transition-all duration-200 hover:scale-105 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 sm:hidden"
+            type="button"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+          <button
+            disabled={disabled}
             onClick={() => imageInputRef.current?.click()}
-            className="rounded-xl p-2.5 text-slate-400 transition-all duration-200 hover:scale-105 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+            className="hidden rounded-xl p-2.5 text-slate-400 transition-all duration-200 hover:scale-105 hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 sm:block"
           >
             <ImageIcon className="w-5 h-5" />
           </button>
@@ -706,6 +744,68 @@ export function ChatInput({
               Dừng và gửi
             </button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={mobileExtensionsOpen} onOpenChange={setMobileExtensionsOpen}>
+        <DialogContent className="max-w-xs sm:max-w-md gap-0 p-6 bg-white dark:bg-slate-800 rounded-3xl border shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-center text-lg font-bold text-slate-800 dark:text-slate-100">
+              Tùy chọn đính kèm
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-4 mt-6">
+            <button
+              onClick={handleMobileSelectImage}
+              className="flex flex-col items-center justify-center p-4 rounded-2xl border border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-blue-50/50 hover:border-blue-200 transition-all duration-200 group"
+            >
+              <div className="w-12 h-12 flex items-center justify-center rounded-full bg-blue-100 text-blue-600 group-hover:scale-110 transition-transform">
+                <ImageIcon className="w-6 h-6" />
+              </div>
+              <span className="mt-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                Hình ảnh
+              </span>
+            </button>
+
+            <button
+              onClick={handleMobileSelectFile}
+              className="flex flex-col items-center justify-center p-4 rounded-2xl border border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-indigo-50/50 hover:border-indigo-200 transition-all duration-200 group"
+            >
+              <div className="w-12 h-12 flex items-center justify-center rounded-full bg-indigo-100 text-indigo-600 group-hover:scale-110 transition-transform">
+                <Paperclip className="w-6 h-6" />
+              </div>
+              <span className="mt-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                Tệp tin
+              </span>
+            </button>
+
+            <button
+              onClick={handleMobileMic}
+              className="flex flex-col items-center justify-center p-4 rounded-2xl border border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-rose-50/50 hover:border-rose-200 transition-all duration-200 group"
+            >
+              <div className="w-12 h-12 flex items-center justify-center rounded-full bg-rose-100 text-rose-600 group-hover:scale-110 transition-transform">
+                <Mic className="w-6 h-6" />
+              </div>
+              <span className="mt-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                Ghi âm
+              </span>
+            </button>
+
+            {onOpenPollDialog && (
+              <button
+                onClick={handleMobilePoll}
+                className="flex flex-col items-center justify-center p-4 rounded-2xl border border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-emerald-50/50 hover:border-emerald-200 transition-all duration-200 group"
+              >
+                <div className="w-12 h-12 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-600 group-hover:scale-110 transition-transform">
+                  <BarChart2 className="w-6 h-6" />
+                </div>
+                <span className="mt-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  Bình chọn
+                </span>
+              </button>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

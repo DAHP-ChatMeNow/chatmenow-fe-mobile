@@ -63,7 +63,17 @@ export default function MainLayout({
         <nav className="md:hidden h-[104px] border-b border-slate-200/80 dark:border-slate-700/60 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md pt-[env(safe-area-inset-top)] shrink-0 z-50 shadow-sm">
           <div className="h-[52px] px-4 flex items-center justify-between">
             {isSearchOpen ? (
-              <div className="flex items-center w-full gap-2">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (searchValue.trim()) {
+                    router.push(`/contacts?search=${encodeURIComponent(searchValue.trim())}`);
+                    setIsSearchOpen(false);
+                    setSearchValue("");
+                  }
+                }}
+                className="flex items-center w-full gap-2"
+              >
                 <div className="flex items-center flex-1 h-10 gap-2 px-4 rounded-full bg-slate-100 dark:bg-slate-800">
                   <Search className="w-4 h-4 text-slate-500" />
                   <input
@@ -85,7 +95,7 @@ export default function MainLayout({
                 >
                   Hủy
                 </button>
-              </div>
+              </form>
             ) : (
               <>
                 <div className="flex items-center gap-2">

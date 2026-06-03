@@ -8,6 +8,8 @@ import {
   MessageCircle,
   MoreHorizontal,
   Trash2,
+  Ban,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,8 +18,10 @@ import {
   useGetFriendProfile,
   useBlockedUsers,
   useRemoveFriend,
+  useContacts,
+  useBlockUser,
 } from "@/hooks/use-contact";
-import { useGetPrivateConversation } from "@/hooks/use-chat";
+import { useGetPrivateConversation, useSendMessage } from "@/hooks/use-chat";
 import { formatPresenceStatus } from "@/lib/utils";
 import {
   Dialog,
@@ -30,7 +34,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { createFriendCardAttachment } from "@/lib/friend-card";
+import { toast } from "sonner";
 
 interface FriendProfileViewProps {
   userId: string;
@@ -46,7 +53,59 @@ export default function FriendProfileView({ userId }: FriendProfileViewProps) {
     useGetPrivateConversation();
   const { mutate: removeFriend, isPending: isRemovingFriend } =
     useRemoveFriend();
+  const { data: contactsData } = useContacts();
+  const { mutate: blockUser } = useBlockUser();
+  const { mutate: sendMessage } = useSendMessage();
+
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [sharingToId, setSharingToId] = useState<string | null>(null);
+
+  const handleBlockUser = () => {
+    if (!friend?.id) return;
+    blockUser(friend.id, {
+      onSuccess: () => {
+        router.back();
+      },
+    });
+  };
+
+  const handleShareCard = (targetFriend: any) => {
+    if (!friend?.id) return;
+    setSharingToId(targetFriend.id || targetFriend._id);
+
+    getPrivateConversation(targetFriend.id || targetFriend._id, {
+      onSuccess: (conversation) => {
+        const cardPayload = {
+          userId: friend.id,
+          displayName: friend.displayName,
+          avatar: friend.avatar,
+          profileUrl: `/profile?userId=${friend.id}`,
+        };
+        const attachment = createFriendCardAttachment(cardPayload);
+
+        sendMessage({
+          conversationId: conversation.id,
+          content: `Đã chia sẻ danh thiếp của ${friend.displayName}`,
+          type: "file",
+          attachments: [attachment],
+        }, {
+          onSuccess: () => {
+            toast.success(`Đã chia sẻ danh thiếp đến ${targetFriend.displayName}`);
+            setSharingToId(null);
+          },
+          onError: () => {
+            toast.error("Không thể chia sẻ danh thiếp");
+            setSharingToId(null);
+          }
+        });
+      },
+      onError: () => {
+        toast.error("Không thể kết nối đến cuộc trò chuyện");
+        setSharingToId(null);
+      }
+    });
+  };
 
   const statusText = useMemo(
     () =>
@@ -179,6 +238,24 @@ export default function FriendProfileView({ userId }: FriendProfileViewProps) {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
                           <DropdownMenuItem
+                            className="gap-2 cursor-pointer"
+                            onClick={() => setShowShareDialog(true)}
+                          >
+                            <Share2 className="w-4 h-4" />
+                            Chia sẻ danh thiếp
+                          </DropdownMenuItem>
+
+                          <DropdownMenuItem
+                            className="gap-2 text-red-600 cursor-pointer focus:text-red-600 focus:bg-red-50"
+                            onClick={handleBlockUser}
+                          >
+                            <Ban className="w-4 h-4" />
+                            Chặn bạn bè
+                          </DropdownMenuItem>
+
+                          <DropdownMenuSeparator />
+
+                          <DropdownMenuItem
                             className="gap-2 text-red-600 cursor-pointer focus:text-red-600 focus:bg-red-50"
                             onClick={() => setShowRemoveConfirm(true)}
                           >
@@ -289,6 +366,54 @@ export default function FriendProfileView({ userId }: FriendProfileViewProps) {
                 "Xóa"
               )}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+        <DialogContent className="max-w-md gap-0 p-0 bg-white dark:bg-slate-800 rounded-2xl">
+          <div className="p-6">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold text-slate-900 dark:text-white">
+                Chia sẻ danh thiếp
+              </DialogTitle>
+            </DialogHeader>
+
+            <ScrollArea className="mt-4 max-h-[300px]">
+              <div className="space-y-3">
+                {contactsData?.contacts && contactsData.contacts.length > 0 ? (
+                  contactsData.contacts.map((contact) => (
+                    <div key={contact.id || contact._id} className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 animate-fade-in">
+                      <div className="flex items-center gap-3">
+                        <PresignedAvatar
+                          avatarKey={contact.avatar}
+                          displayName={contact.displayName}
+                          className="w-10 h-10"
+                        />
+                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                          {contact.displayName}
+                        </span>
+                      </div>
+                      <Button
+                        size="sm"
+                        disabled={sharingToId !== null}
+                        onClick={() => handleShareCard(contact)}
+                      >
+                        {sharingToId === (contact.id || contact._id) ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          "Gửi"
+                        )}
+                      </Button>
+                    </div>
+                  ))
+                ) : (
+                  <p className="py-4 text-center text-sm text-slate-500">
+                    Không có bạn bè nào để chia sẻ
+                  </p>
+                )}
+              </div>
+            </ScrollArea>
           </div>
         </DialogContent>
       </Dialog>

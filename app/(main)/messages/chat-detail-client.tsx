@@ -76,6 +76,8 @@ import { chatService, MessagesResponse } from "@/services/chat";
 import { postService } from "@/services/post";
 import { usePresignedUrl } from "@/hooks/use-profile";
 import { toast } from "sonner";
+import { Capacitor } from "@capacitor/core";
+import { Preferences } from "@capacitor/preferences";
 import {
   decodeFriendCardPayload,
   FRIEND_CARD_ATTACHMENT_TYPE,
@@ -559,7 +561,7 @@ function FriendCardBubble({
   const canShowAddFriend = !isFriend && !isLoadingFriendState && !isMe;
 
   const handleOpenProfile = () => {
-    router.push(card.profileUrl);
+    router.push(`/profile?userId=${card.userId}`);
   };
 
   const handleAddFriend = (event: MouseEvent<HTMLButtonElement>) => {
@@ -568,7 +570,7 @@ function FriendCardBubble({
 
     sendFriendRequest(card.userId, {
       onSuccess: () => {
-        router.push(card.profileUrl);
+        router.push(`/profile?userId=${card.userId}`);
       },
     });
   };
@@ -1716,7 +1718,7 @@ export default function ChatDetailClient({ conversationId: propConversationId }:
   const currentUserId = user?.id || user?._id;
 
   // Lấy conversation và messages riêng biệt
-  const { data: conversationFromDetail } = useConversation(conversationId);
+  const { data: conversationFromDetail, error: conversationError } = useConversation(conversationId);
   const { data: aiConversationData } = useAiConversation();
   const { data: conversationsData } = useConversations();
   const {
@@ -1726,6 +1728,14 @@ export default function ChatDetailClient({ conversationId: propConversationId }:
   } = useMessages(conversationId, {
     limit: 20,
   });
+
+  useEffect(() => {
+    const status = (conversationError as any)?.response?.status;
+    if (conversationError && (status === 404 || status === 403 || status === 401)) {
+      toast.error("Cuộc trò chuyện không tồn tại hoặc đã bị xóa");
+      router.push("/messages");
+    }
+  }, [conversationError, router]);
   const { data: pinnedMessagesData } = usePinnedMessages(conversationId);
   const aiConversation =
     aiConversationData?.conversation?.id === conversationId
@@ -2506,15 +2516,37 @@ export default function ChatDetailClient({ conversationId: propConversationId }:
       return;
     }
 
-    const saved = localStorage.getItem(
-      `chat-background:${conversationId}`,
-    ) as ChatBackgroundKey | null;
+    let active = true;
 
-    if (saved && saved in CHAT_BACKGROUND_CLASS) {
-      setBackgroundKey(saved);
-    } else {
-      setBackgroundKey("default");
-    }
+    const loadBg = async () => {
+      let saved: string | null = null;
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const res = await Preferences.get({ key: `chat-background:${conversationId}` });
+          saved = res.value;
+        } catch (e) {
+          console.error("Preferences.get error:", e);
+        }
+      }
+      
+      if (!saved) {
+        saved = localStorage.getItem(`chat-background:${conversationId}`);
+      }
+
+      if (!active) return;
+
+      if (saved && saved in CHAT_BACKGROUND_CLASS) {
+        setBackgroundKey(saved as ChatBackgroundKey);
+      } else {
+        setBackgroundKey("default");
+      }
+    };
+
+    void loadBg();
+
+    return () => {
+      active = false;
+    };
   }, [conversationId]);
 
   useEffect(() => {
