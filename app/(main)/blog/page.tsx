@@ -322,6 +322,11 @@ export default function BlogPage() {
   const handleStoryFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>,
   ) => {
+    if (e.target.files && e.target.files.length > 1) {
+      toast.error("Story chỉ hỗ trợ đăng 1 tệp duy nhất");
+      e.target.value = "";
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 

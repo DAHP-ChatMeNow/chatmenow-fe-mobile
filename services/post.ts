@@ -2,6 +2,7 @@ import api from "@/lib/axios";
 import { Post, PostPrivacy } from "@/types/post";
 import { Comment } from "@/types/comment";
 import { User } from "@/types/user";
+import { uploadFileToS3 } from "@/lib/upload-helper";
 import { userService } from "@/services/user";
 
 export type CreatePostPayload = {
@@ -451,31 +452,35 @@ const getFeed = async ({ pageParam = 1 }: { pageParam?: number }) => {
 };
 
 const createPost = async (payload: CreatePostPayload) => {
-  const formData = new FormData();
-  formData.append("content", payload.content);
-  formData.append("privacy", payload.privacy || "public");
-  if (payload.customAudienceIds && payload.customAudienceIds.length > 0) {
-    formData.append(
-      "customAudienceIds",
-      JSON.stringify(payload.customAudienceIds),
-    );
-  }
+  const media: { url: string; type: string; duration?: number }[] = [];
 
   if (payload.mediaFiles && payload.mediaFiles.length > 0) {
-    payload.mediaFiles.forEach((file) => formData.append("media", file));
-    if (payload.videoDurations && payload.videoDurations.length > 0) {
-      payload.videoDurations.forEach((d) =>
-        formData.append("videoDurations[]", String(d)),
-      );
+    for (let i = 0; i < payload.mediaFiles.length; i++) {
+      const file = payload.mediaFiles[i];
+      const key = await uploadFileToS3(file, "posts");
+      const fileType = file.type.startsWith("video/") ? "video" : "image";
+      
+      const mediaItem: { url: string; type: string; duration?: number } = {
+        url: key,
+        type: fileType,
+      };
+
+      if (fileType === "video" && payload.videoDurations && payload.videoDurations[i]) {
+        mediaItem.duration = payload.videoDurations[i];
+      }
+
+      media.push(mediaItem);
     }
   }
 
   const { data } = await api.post<BackendPost | { post: BackendPost }>(
     "/posts",
-    formData,
     {
-      headers: { "Content-Type": "multipart/form-data" },
-    },
+      content: payload.content,
+      privacy: payload.privacy || "public",
+      customAudienceIds: payload.customAudienceIds,
+      media,
+    }
   );
 
   return mapBackendPost(((data as any)?.post || data) as BackendPost);

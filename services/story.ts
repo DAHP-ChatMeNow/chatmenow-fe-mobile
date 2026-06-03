@@ -1,6 +1,7 @@
 import api from "@/lib/axios";
 import { Story, StoryGroup, StoryPrivacy, StoryReply } from "@/types/story";
 import { User } from "@/types/user";
+import { uploadFileToS3 } from "@/lib/upload-helper";
 
 export type CreateStoryPayload = {
   mediaFile: File;
@@ -61,21 +62,23 @@ const mapStoryGroup = (group: BackendStoryGroup): StoryGroup => ({
 });
 
 const createStory = async (payload: CreateStoryPayload) => {
-  const formData = new FormData();
-  formData.append("media", payload.mediaFile);
-  formData.append("caption", payload.caption || "");
-  formData.append("privacy", payload.privacy || "friends");
-
-  if (typeof payload.videoDuration === "number") {
-    formData.append("videoDuration", String(payload.videoDuration));
+  if (!payload.mediaFile) {
+    throw new Error("Vui lòng chọn ảnh hoặc video để đăng tin");
   }
 
-  if (payload.musicUrl) formData.append("musicUrl", payload.musicUrl);
-  if (payload.musicTitle) formData.append("musicTitle", payload.musicTitle);
-  if (payload.musicArtist) formData.append("musicArtist", payload.musicArtist);
+  // Upload to S3 using the unified upload helper
+  const key = await uploadFileToS3(payload.mediaFile, "stories");
+  const mediaType = payload.mediaFile.type.startsWith("video/") ? "video" : "image";
 
-  const { data } = await api.post<BackendStory>("/stories", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
+  const { data } = await api.post<BackendStory>("/stories", {
+    mediaKey: key,
+    mediaType,
+    caption: payload.caption || "",
+    privacy: payload.privacy || "friends",
+    videoDuration: payload.videoDuration,
+    musicUrl: payload.musicUrl,
+    musicTitle: payload.musicTitle,
+    musicArtist: payload.musicArtist,
   });
 
   return mapStory(data);

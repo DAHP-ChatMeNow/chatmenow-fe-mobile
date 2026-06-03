@@ -390,6 +390,30 @@ function AudioElement({ stream }: { stream: MediaStream | null }) {
   return <audio ref={audioRef} autoPlay playsInline className="hidden" />;
 }
 
+const getSharedAudioContext = () => {
+  if (typeof window === "undefined") return null;
+  const w = window as any;
+  if (!w.__sharedAudioContext) {
+    const AudioContextClass = w.AudioContext || w.webkitAudioContext;
+    if (AudioContextClass) {
+      w.__sharedAudioContext = new AudioContextClass();
+    }
+  }
+  return w.__sharedAudioContext;
+};
+
+if (typeof window !== "undefined") {
+  const resume = () => {
+    const ctx = getSharedAudioContext();
+    if (ctx && ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+  };
+  window.addEventListener("click", resume);
+  window.addEventListener("touchstart", resume);
+  window.addEventListener("keydown", resume);
+}
+
 export function VideoCallProvider({ children }: { children: ReactNode }) {
   const { socket, isConnected } = useSocket();
   const user = useAuthStore((state) => state.user);
@@ -605,16 +629,14 @@ export function VideoCallProvider({ children }: { children: ReactNode }) {
 
       if (typeof window === "undefined") return;
 
-      const AudioContextClass =
-        window.AudioContext ||
-        (window as Window & { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext;
-      if (!AudioContextClass) return;
+      const audioContext = getSharedAudioContext();
+      if (!audioContext) return;
 
-      const audioContext = new AudioContextClass();
-      void audioContext.resume().catch(() => {
-        // Browser may block autoplay until user interacts.
-      });
+      if (audioContext.state === "suspended") {
+        void audioContext.resume().catch(() => {
+          // Browser may block autoplay until user interacts.
+        });
+      }
 
       let disposed = false;
       let patternTimeoutId: number | null = null;
@@ -644,18 +666,18 @@ export function VideoCallProvider({ children }: { children: ReactNode }) {
 
       const playPattern = () => {
         if (mode === "incoming") {
-          beep(740, 180, 0.03);
+          beep(880, 250, 0.35);
           patternTimeoutId = window.setTimeout(() => {
-            beep(740, 180, 0.03);
-          }, 250);
+            beep(880, 250, 0.35);
+          }, 350);
           return;
         }
 
-        beep(520, 320, 0.025);
+        beep(440, 400, 0.15);
       };
 
       playPattern();
-      const intervalId = window.setInterval(playPattern, 1500);
+      const intervalId = window.setInterval(playPattern, 1800);
 
       stopRingtoneRef.current = () => {
         disposed = true;
@@ -663,9 +685,6 @@ export function VideoCallProvider({ children }: { children: ReactNode }) {
         if (patternTimeoutId !== null) {
           window.clearTimeout(patternTimeoutId);
         }
-        void audioContext.close().catch(() => {
-          // Ignore close errors after cleanup.
-        });
       };
     },
     [stopRingtone],

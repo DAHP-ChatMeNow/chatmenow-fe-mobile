@@ -321,23 +321,43 @@ export default function ProfilePage() {
   };
 
   const handleUseCurrentLocation = async () => {
-    if (!navigator?.geolocation) {
-      toast.error("Thiết bị không hỗ trợ định vị");
-      return;
-    }
-
     setIsDetectingLocation(true);
     try {
-      const position = await new Promise<GeolocationPosition>(
-        (resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10000,
-          });
-        },
-      );
+      let latitude: number;
+      let longitude: number;
 
-      const { latitude, longitude } = position.coords;
+      if (typeof window !== "undefined" && (window as any).Capacitor) {
+        const { Geolocation } = await import("@capacitor/geolocation");
+        const perm = await Geolocation.requestPermissions();
+        if (perm.location !== "granted") {
+          toast.error("Bạn chưa cấp quyền truy cập vị trí");
+          setIsDetectingLocation(false);
+          return;
+        }
+        const capPosition = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 10000,
+        });
+        latitude = capPosition.coords.latitude;
+        longitude = capPosition.coords.longitude;
+      } else {
+        if (!navigator?.geolocation) {
+          toast.error("Thiết bị không hỗ trợ định vị");
+          setIsDetectingLocation(false);
+          return;
+        }
+        const position = await new Promise<GeolocationPosition>(
+          (resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 10000,
+            });
+          },
+        );
+        latitude = position.coords.latitude;
+        longitude = position.coords.longitude;
+      }
+
       const response = await fetch(
         `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&accept-language=vi`,
       );
@@ -365,14 +385,7 @@ export default function ProfilePage() {
       setHometown(resolvedHometown);
       toast.success("Đã cập nhật quê quán theo vị trí hiện tại");
     } catch (error: unknown) {
-      const geoError = error as GeolocationPositionError | undefined;
-      if (geoError?.code === 1) {
-        toast.error("Bạn chưa cấp quyền truy cập vị trí");
-      } else if (geoError?.code === 3) {
-        toast.error("Hết thời gian lấy vị trí, vui lòng thử lại");
-      } else {
-        toast.error("Không thể lấy vị trí hiện tại");
-      }
+      toast.error("Không thể lấy vị trí hiện tại");
     } finally {
       setIsDetectingLocation(false);
     }
@@ -873,7 +886,7 @@ export default function ProfilePage() {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1 pb-2">
             {/* Display Name */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-900 dark:text-slate-200">
@@ -1092,9 +1105,10 @@ export default function ProfilePage() {
                 </button>
               )}
             </div>
+          </div>
 
-            {/* Action Buttons */}
-            <div className="flex gap-3 pt-4">
+          {/* Action Buttons */}
+          <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-slate-700/50 mt-2">
               <Button
                 variant="outline"
                 onClick={() => setShowEditDialog(false)}
@@ -1118,7 +1132,6 @@ export default function ProfilePage() {
                 )}
               </Button>
             </div>
-          </div>
         </DialogContent>
       </Dialog>
 
